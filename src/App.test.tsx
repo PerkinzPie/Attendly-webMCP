@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { createEventOperationsService, type EventOperationsService } from './application/eventOperationsService'
 import { createPersistentEventOperationsStore } from './application/eventOperationsStore'
@@ -58,6 +58,10 @@ function openOrganisation(name: string) {
   fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'View events' }))
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('Attendly organisation directory', () => {
   it('presents organisations as the top-level entities', () => {
     render(<App />)
@@ -67,24 +71,25 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByRole('heading', { name: 'Westbrook Primary School' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'St Luke’s Community Church' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Westbrook Autumn Fair' })).not.toBeInTheDocument()
-    expect(screen.getByRole('note')).toHaveTextContent(/fictional and use synthetic data/i)
+    expect(screen.queryByText(/synthetic demo/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/fictional and use synthetic data/i)).not.toBeInTheDocument()
   })
 
-  it('identifies the demonstration and opens the primary operations workspace directly', () => {
+  it('opens the dashboard directly', () => {
     render(<App />)
 
     expect(screen.getByText('Attendly-webMCP')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Attendly-webMCP home' })).toBeInTheDocument()
 
     const publicEvents = screen.getByRole('button', { name: 'Public events' })
-    const liveOperations = screen.getByRole('button', { name: 'Live operations' })
+    const dashboard = screen.getByRole('button', { name: 'Dashboard' })
     expect(publicEvents).toHaveAttribute('aria-current', 'page')
-    liveOperations.focus()
-    expect(liveOperations).toHaveFocus()
-    fireEvent.click(liveOperations)
+    dashboard.focus()
+    expect(dashboard).toHaveFocus()
+    fireEvent.click(dashboard)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Riverside Community Workshop' })).toHaveFocus()
-    expect(liveOperations).toHaveAttribute('aria-current', 'page')
+    expect(dashboard).toHaveAttribute('aria-current', 'page')
     const totals = screen.getByLabelText('Current event totals')
     expect(within(totals).getByText('Registered').nextElementSibling).toHaveTextContent('16')
     expect(within(totals).getByText('Checked in').nextElementSibling).toHaveTextContent('13')
@@ -95,7 +100,7 @@ describe('Attendly organisation directory', () => {
   it('updates live totals and announces shared service changes without a page refresh', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Live operations' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
 
     act(() => {
       const result = service.checkInAttendee({
@@ -116,24 +121,20 @@ describe('Attendly organisation directory', () => {
   it('does not reset persisted state before confirmation and supports cancellation', () => {
     const service = createTestOperationsService()
     expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<App operationsService={service} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
-    const dialog = screen.getByRole('dialog', { name: 'Reset the demo?' })
-    expect(within(dialog).getByText(/all current demo changes will be discarded/i)).toBeInTheDocument()
-    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-
-    expect(screen.queryByRole('dialog', { name: 'Reset the demo?' })).not.toBeInTheDocument()
+    expect(confirmReset).toHaveBeenCalledWith('Reset demo?')
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
-    expect(screen.queryByText(/demo reset complete/i)).not.toBeInTheDocument()
   })
 
   it('resets changed persisted and visible state from an open event', () => {
     const service = createTestOperationsService()
     expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
     expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App operationsService={service} />)
     openOrganisation('Westbrook Primary School')
     const eventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
@@ -143,13 +144,7 @@ describe('Attendly organisation directory', () => {
     fireEvent.change(within(eventDialog).getByLabelText('Your name'), { target: { value: 'Alex Morgan' } })
     fireEvent.click(within(eventDialog).getByRole('button', { name: 'Reset demo' }))
 
-    const resetDialog = screen.getByRole('dialog', { name: 'Reset the demo?' })
-    fireEvent.click(within(resetDialog).getByRole('button', { name: 'Reset synthetic demo' }))
-
     expect(screen.getByRole('heading', { level: 1, name: 'Find events in your community' })).toBeInTheDocument()
-    expect(screen.getByText('Demo reset complete. The deterministic synthetic data is ready.', {
-      selector: '.reset-feedback',
-    })).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({
       ok: true,
       data: { checkedInCount: 13, notArrivedCount: 3, activeAccountability: null },
@@ -166,18 +161,16 @@ describe('Attendly organisation directory', () => {
   it('shows a recoverable reset error without claiming success when persistence fails', () => {
     const harness = createTestOperationsHarness()
     expect(harness.service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
     render(<App operationsService={harness.service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Live operations' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
     harness.failNextWrite()
 
-    const dialog = screen.getByRole('dialog', { name: 'Reset the demo?' })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset synthetic demo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
 
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(
-      'The event operation could not be saved. No changes were saved. Check browser storage and retry.',
-    )
-    expect(screen.queryByText(/demo reset complete/i)).not.toBeInTheDocument()
+    expect(alert).toHaveBeenCalledWith('Reset failed. Please try again.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Reset failed. Please try again.')
     expect(harness.service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
   })
 

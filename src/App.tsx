@@ -24,7 +24,7 @@ type AppSurface = 'directory' | 'operations'
 
 const demoUiActor = {
   id: 'actor_demo_demonstrator',
-  displayName: 'Synthetic demo demonstrator',
+  displayName: 'Dashboard user',
   channel: 'human-ui',
   isSynthetic: true,
 } as const
@@ -150,11 +150,9 @@ function OperationsWorkspace({
       <div className="section-inner">
         <div className="workspace-heading">
           <div>
-            <p className="workspace-context">Event operations</p>
+            <p className="workspace-context">Dashboard</p>
             <h1 id="operations-title" ref={headingRef} tabIndex={-1}>Riverside Community Workshop</h1>
-            <p>A calm, shared view of the synthetic event state for organisers and connected agents.</p>
           </div>
-          <span className="workspace-status"><span aria-hidden="true" /> Demo ready</span>
         </div>
 
         {error ? <div className="workspace-error" role="alert">{error}</div> : null}
@@ -173,7 +171,6 @@ function OperationsWorkspace({
                 <div className="panel-heading">
                   <div>
                     <h2 id="capacity-watch-title">Capacity watch</h2>
-                    <p>Registration capacity is monitored against the configured warning threshold.</p>
                   </div>
                   <span className={`state-badge ${snapshot.capacityStatus}`}>{snapshot.capacityStatus.replace('-', ' ')}</span>
                 </div>
@@ -185,8 +182,7 @@ function OperationsWorkspace({
 
               <section className="workspace-panel workspace-actions" aria-labelledby="workspace-actions-title">
                 <div>
-                  <h2 id="workspace-actions-title">Workspace controls</h2>
-                  <p>Refresh the persisted state or return to the public demonstration.</p>
+                  <h2 id="workspace-actions-title">Actions</h2>
                 </div>
                 <div className="workspace-buttons">
                   <button className="button button-primary" type="button" onClick={onRefresh}>Refresh live state</button>
@@ -198,7 +194,6 @@ function OperationsWorkspace({
             <div className="workspace-strip" aria-label="Current workspace context">
               <div><span>Accountability</span><strong>{accountabilityLabel}</strong></div>
               <div><span>Shared revision</span><strong>{snapshot.revision}</strong></div>
-              <p>Changes made through the visible interface or a connected site tool appear in this same workspace.</p>
             </div>
           </>
         ) : null}
@@ -218,9 +213,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     initialOperationsResult.ok ? null : `${initialOperationsResult.error.message} ${initialOperationsResult.error.remediation}`,
   )
   const [operationsAnnouncement, setOperationsAnnouncement] = useState('')
-  const [resetRequested, setResetRequested] = useState(false)
-  const [resetError, setResetError] = useState<string | null>(null)
-  const [resetFeedback, setResetFeedback] = useState<string | null>(null)
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null)
   const [organisationQuery, setOrganisationQuery] = useState('')
   const [organisationFilter, setOrganisationFilter] = useState<OrganisationFilter>('All organisations')
@@ -232,8 +224,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const [bookingName, setBookingName] = useState('')
   const [bookingEmail, setBookingEmail] = useState('')
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const resetDialogRef = useRef<HTMLDialogElement>(null)
-  const resetReturnEventRef = useRef<DemoEvent | null>(null)
   const operationsHeadingRef = useRef<HTMLHeadingElement>(null)
   const directoryHeadingRef = useRef<HTMLHeadingElement>(null)
 
@@ -271,13 +261,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     if (typeof dialog.showModal === 'function') dialog.showModal()
     else dialog.setAttribute('open', '')
   }, [selectedEvent])
-
-  useEffect(() => {
-    const dialog = resetDialogRef.current
-    if (!resetRequested || !dialog || dialog.open) return
-    if (typeof dialog.showModal === 'function') dialog.showModal()
-    else dialog.setAttribute('open', '')
-  }, [resetRequested])
 
   useEffect(() => {
     return service.subscribe((snapshot) => {
@@ -342,41 +325,17 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   }
 
   const requestReset = () => {
-    resetReturnEventRef.current = selectedEvent
-    setSelectedEvent(null)
-    setResetError(null)
-    setResetFeedback(null)
-    setResetRequested(true)
-  }
+    if (!window.confirm('Reset demo?')) return
 
-  const handleResetDialogClose = () => {
-    setResetRequested(false)
-    setResetError(null)
-    const returnEvent = resetReturnEventRef.current
-    resetReturnEventRef.current = null
-    if (returnEvent) setSelectedEvent(returnEvent)
-  }
-
-  const closeResetDialog = () => {
-    const dialog = resetDialogRef.current
-    if (dialog && typeof dialog.close === 'function') dialog.close()
-    else {
-      dialog?.removeAttribute('open')
-      handleResetDialogClose()
-    }
-  }
-
-  const confirmReset = () => {
     const result = service.resetDemo({ actor: demoUiActor })
     if (!result.ok) {
-      const message = `${result.error.message} ${result.error.remediation}`
-      setResetError(message)
+      const message = 'Reset failed. Please try again.'
+      setOperationsError(message)
       setOperationsAnnouncement(message)
+      window.alert(message)
       return
     }
 
-    const message = 'Demo reset complete. The deterministic synthetic data is ready.'
-    resetReturnEventRef.current = null
     setSurface('directory')
     setSelectedOrganisationId(null)
     setOrganisationQuery('')
@@ -390,9 +349,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setBookingEmail('')
     setOperationsSnapshot(result.data)
     setOperationsError(null)
-    setResetFeedback(message)
-    setOperationsAnnouncement(message)
-    closeResetDialog()
+    setOperationsAnnouncement('Demo reset.')
     requestAnimationFrame(() => directoryHeadingRef.current?.focus())
   }
 
@@ -430,17 +387,11 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           </button>
           <nav aria-label="Main navigation">
             <button type="button" aria-current={surface === 'directory' ? 'page' : undefined} onClick={showDirectory}>Public events</button>
-            <button type="button" aria-current={surface === 'operations' ? 'page' : undefined} onClick={showOperations}>Live operations</button>
+            <button type="button" aria-current={surface === 'operations' ? 'page' : undefined} onClick={showOperations}>Dashboard</button>
           </nav>
-          <div className="header-utilities">
-            <span className="header-context"><span aria-hidden="true" /> Synthetic demo</span>
-            <button className="demo-reset-button" type="button" onClick={requestReset}>Reset demo</button>
-          </div>
+          <button className="demo-reset-button" type="button" onClick={requestReset}>Reset demo</button>
         </div>
-        <div className="demo-banner" role="note">All people, organisations and events in this demonstration are fictional and use synthetic data.</div>
       </header>
-
-      {resetFeedback ? <div className="reset-feedback" aria-live="polite"><Icon name="check" /> {resetFeedback}</div> : null}
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{operationsAnnouncement}</p>
 
@@ -556,7 +507,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
         <div className="footer-inner">
           <div><img src="/attendly-logo.png" alt="Attendly" /><p>Simple event sign-ups and door check-in for community organisers.</p></div>
           <div className="footer-links"><button type="button" onClick={showDirectory}>Browse organisations</button><button type="button" onClick={showHowItWorks}>How it works</button></div>
-          <p className="demo-disclosure">All organisations, people and events shown here are fictional and use synthetic data for the OpenAI WebMCP Challenge.</p>
         </div>
       </footer>
 
@@ -609,34 +559,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           </div>
         </dialog>
       ) : null}
-
-      <dialog
-        className="reset-dialog"
-        ref={resetDialogRef}
-        aria-labelledby="reset-dialog-title"
-        aria-describedby="reset-dialog-description"
-        onClose={handleResetDialogClose}
-        onClick={(event) => { if (event.target === event.currentTarget) closeResetDialog() }}
-      >
-        <div className="reset-dialog-content">
-          <div>
-            <p className="reset-dialog-context">Synthetic demonstration</p>
-            <h2 id="reset-dialog-title">Reset the demo?</h2>
-          </div>
-          <p id="reset-dialog-description">All current demo changes will be discarded, including check-ins, accountability updates and activity history.</p>
-          <ul>
-            <li>Riverside returns to 16 registrations and 13 check-ins.</li>
-            <li>Active accountability sessions and prepared booking details are cleared.</li>
-            <li>The public organisation directory becomes the starting screen.</li>
-          </ul>
-          <p className="reset-demo-only">This is a demo-only action. It does not affect any production Attendly data.</p>
-          {resetError ? <div className="reset-dialog-error" role="alert">{resetError}</div> : null}
-          <div className="reset-dialog-actions">
-            <button className="button button-secondary" type="button" onClick={closeResetDialog} autoFocus>Cancel</button>
-            <button className="button button-reset-confirm" type="button" onClick={confirmReset}>Reset synthetic demo</button>
-          </div>
-        </div>
-      </dialog>
     </div>
   )
 }
