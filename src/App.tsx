@@ -1,5 +1,10 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { getDemoEventOperationsService } from './application/demoEventOperations'
+import type {
+  EventOperationsService,
+  EventOperationsServiceSnapshot,
+} from './application/eventOperationsService'
 import {
   demoEvents,
   demoOrganisations,
@@ -15,6 +20,7 @@ type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' 
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
 type OrganisationFilter = 'All organisations' | OrganisationType
 type EventFilter = 'All events' | EventCategory
+type AppSurface = 'directory' | 'operations'
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -115,7 +121,96 @@ function EventRow({ event, onSelect }: { event: DemoEvent; onSelect: (event: Dem
   )
 }
 
-function App() {
+function OperationsWorkspace({
+  snapshot,
+  error,
+  headingRef,
+  onRefresh,
+  onBrowseEvents,
+}: {
+  snapshot: EventOperationsServiceSnapshot | null
+  error: string | null
+  headingRef: RefObject<HTMLHeadingElement | null>
+  onRefresh: () => void
+  onBrowseEvents: () => void
+}) {
+  const accountabilityLabel = snapshot?.activeAccountability
+    ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
+    : 'Not started'
+
+  return (
+    <section className="operations-workspace" aria-labelledby="operations-title">
+      <div className="section-inner">
+        <div className="workspace-heading">
+          <div>
+            <p className="workspace-context">Event operations</p>
+            <h1 id="operations-title" ref={headingRef} tabIndex={-1}>Riverside Community Workshop</h1>
+            <p>A calm, shared view of the synthetic event state for organisers and connected agents.</p>
+          </div>
+          <span className="workspace-status"><span aria-hidden="true" /> Demo ready</span>
+        </div>
+
+        {error ? <div className="workspace-error" role="alert">{error}</div> : null}
+
+        {snapshot ? (
+          <>
+            <dl className="workspace-totals" aria-label="Current event totals">
+              <div><dt>Registered</dt><dd>{snapshot.registrationCount}</dd></div>
+              <div><dt>Checked in</dt><dd>{snapshot.checkedInCount}</dd></div>
+              <div><dt>Not arrived</dt><dd>{snapshot.notArrivedCount}</dd></div>
+              <div><dt>Capacity remaining</dt><dd>{snapshot.capacityRemaining}</dd></div>
+            </dl>
+
+            <div className="workspace-layout">
+              <section className="workspace-panel" aria-labelledby="capacity-watch-title">
+                <div className="panel-heading">
+                  <div>
+                    <h2 id="capacity-watch-title">Capacity watch</h2>
+                    <p>Registration capacity is monitored against the configured warning threshold.</p>
+                  </div>
+                  <span className={`state-badge ${snapshot.capacityStatus}`}>{snapshot.capacityStatus.replace('-', ' ')}</span>
+                </div>
+                <div className="capacity-summary">
+                  <strong>{snapshot.capacityRemaining} places remain</strong>
+                  <span>{snapshot.registrationCount} of {snapshot.capacity} places registered</span>
+                </div>
+              </section>
+
+              <section className="workspace-panel workspace-actions" aria-labelledby="workspace-actions-title">
+                <div>
+                  <h2 id="workspace-actions-title">Workspace controls</h2>
+                  <p>Refresh the persisted state or return to the public demonstration.</p>
+                </div>
+                <div className="workspace-buttons">
+                  <button className="button button-primary" type="button" onClick={onRefresh}>Refresh live state</button>
+                  <button className="button button-secondary" type="button" onClick={onBrowseEvents}>Browse public events</button>
+                </div>
+              </section>
+            </div>
+
+            <div className="workspace-strip" aria-label="Current workspace context">
+              <div><span>Accountability</span><strong>{accountabilityLabel}</strong></div>
+              <div><span>Shared revision</span><strong>{snapshot.revision}</strong></div>
+              <p>Changes made through the visible interface or a connected site tool appear in this same workspace.</p>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function App({ operationsService }: { operationsService?: EventOperationsService }) {
+  const [service] = useState(() => operationsService ?? getDemoEventOperationsService())
+  const [initialOperationsResult] = useState(() => service.getSnapshot())
+  const [surface, setSurface] = useState<AppSurface>('directory')
+  const [operationsSnapshot, setOperationsSnapshot] = useState<EventOperationsServiceSnapshot | null>(
+    initialOperationsResult.ok ? initialOperationsResult.data : null,
+  )
+  const [operationsError, setOperationsError] = useState<string | null>(
+    initialOperationsResult.ok ? null : `${initialOperationsResult.error.message} ${initialOperationsResult.error.remediation}`,
+  )
+  const [operationsAnnouncement, setOperationsAnnouncement] = useState('')
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null)
   const [organisationQuery, setOrganisationQuery] = useState('')
   const [organisationFilter, setOrganisationFilter] = useState<OrganisationFilter>('All organisations')
@@ -127,6 +222,7 @@ function App() {
   const [bookingName, setBookingName] = useState('')
   const [bookingEmail, setBookingEmail] = useState('')
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const operationsHeadingRef = useRef<HTMLHeadingElement>(null)
 
   const selectedOrganisation = demoOrganisations.find((item) => item.id === selectedOrganisationId) ?? null
   const organisationEvents = useMemo(
@@ -163,8 +259,22 @@ function App() {
     else dialog.setAttribute('open', '')
   }, [selectedEvent])
 
+  useEffect(() => {
+    return service.subscribe((snapshot) => {
+      setOperationsSnapshot(snapshot)
+      setOperationsError(null)
+      setOperationsAnnouncement(
+        `${snapshot.event.name} updated. ${snapshot.checkedInCount} checked in, ${snapshot.notArrivedCount} not arrived.`,
+      )
+    })
+  }, [service])
+
+  useEffect(() => {
+    if (surface === 'operations') operationsHeadingRef.current?.focus()
+  }, [surface])
+
   const scrollToTop = () => {
-    const top = document.getElementById('top')
+    const top = document.getElementById('main-content')
     if (top && typeof top.scrollIntoView === 'function') top.scrollIntoView({ block: 'start' })
   }
 
@@ -176,8 +286,39 @@ function App() {
   }
 
   const showDirectory = () => {
+    setSurface('directory')
     setSelectedOrganisationId(null)
     requestAnimationFrame(scrollToTop)
+  }
+
+  const showOperations = () => {
+    setSelectedEvent(null)
+    setSurface('operations')
+    requestAnimationFrame(scrollToTop)
+  }
+
+  const showHowItWorks = () => {
+    setSurface('directory')
+    setSelectedOrganisationId(null)
+    requestAnimationFrame(() => {
+      document.getElementById('how-it-works')?.scrollIntoView({ block: 'start' })
+    })
+  }
+
+  const refreshOperations = () => {
+    const result = service.getSnapshot()
+    if (!result.ok) {
+      const message = `${result.error.message} ${result.error.remediation}`
+      setOperationsError(message)
+      setOperationsAnnouncement(message)
+      return
+    }
+
+    setOperationsSnapshot(result.data)
+    setOperationsError(null)
+    setOperationsAnnouncement(
+      `${result.data.event.name} refreshed. ${result.data.checkedInCount} checked in, ${result.data.notArrivedCount} not arrived.`,
+    )
   }
 
   const openEvent = (item: DemoEvent) => {
@@ -204,23 +345,35 @@ function App() {
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href={selectedOrganisation ? '#events' : '#organisations'}>Skip to results</a>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
 
       <header className="site-header">
         <div className="header-inner">
-          <button className="attendly-brand" type="button" onClick={showDirectory} aria-label="Attendly home">
-            <img src="/attendly-logo.png" alt="Attendly" />
+          <button className="attendly-brand" type="button" onClick={showDirectory} aria-label="Attendly-webMCP home">
+            <img src="/attendly-logo.png" alt="" />
+            <span>Attendly-webMCP</span>
           </button>
           <nav aria-label="Main navigation">
-            <button type="button" onClick={showDirectory}>Organisations</button>
-            <a href="#how-it-works">How it works</a>
+            <button type="button" aria-current={surface === 'directory' ? 'page' : undefined} onClick={showDirectory}>Public events</button>
+            <button type="button" aria-current={surface === 'operations' ? 'page' : undefined} onClick={showOperations}>Live operations</button>
           </nav>
-          <span className="header-context">Community events</span>
+          <span className="header-context"><span aria-hidden="true" /> Synthetic demo</span>
         </div>
+        <div className="demo-banner" role="note">All people, organisations and events in this demonstration are fictional and use synthetic data.</div>
       </header>
 
-      <main id="top">
-        {selectedOrganisation ? (
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{operationsAnnouncement}</p>
+
+      <main id="main-content" tabIndex={-1}>
+        {surface === 'operations' ? (
+          <OperationsWorkspace
+            snapshot={operationsSnapshot}
+            error={operationsError}
+            headingRef={operationsHeadingRef}
+            onRefresh={refreshOperations}
+            onBrowseEvents={showDirectory}
+          />
+        ) : selectedOrganisation ? (
           <>
             <section className="organisation-profile" aria-labelledby="organisation-title">
               <div className="profile-inner">
@@ -322,7 +475,7 @@ function App() {
       <footer>
         <div className="footer-inner">
           <div><img src="/attendly-logo.png" alt="Attendly" /><p>Simple event sign-ups and door check-in for community organisers.</p></div>
-          <div className="footer-links"><button type="button" onClick={showDirectory}>Browse organisations</button><a href="#how-it-works">How it works</a></div>
+          <div className="footer-links"><button type="button" onClick={showDirectory}>Browse organisations</button><button type="button" onClick={showHowItWorks}>How it works</button></div>
           <p className="demo-disclosure">All organisations, people and events shown here are fictional and use synthetic data for the OpenAI WebMCP Challenge.</p>
         </div>
       </footer>
