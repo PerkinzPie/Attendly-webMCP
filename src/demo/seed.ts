@@ -1,3 +1,5 @@
+import { createEventOperationsState, type EventOperationsState, type OperationsActor } from '../domain/eventOperations'
+
 export type OrganisationType =
   | 'Charity'
   | 'Church'
@@ -532,4 +534,49 @@ export function createDemoOperationsSeed(): DemoOperationsSeed {
     attendanceAnomalies: operationsAttendanceAnomalies.map((anomaly) => ({ ...anomaly })),
     isSynthetic: true,
   }
+}
+
+const frontDeskActor: OperationsActor = {
+  id: 'actor_front_desk_volunteer',
+  displayName: 'Synthetic front-desk volunteer',
+  channel: 'human-ui',
+  isSynthetic: true,
+}
+
+export function createDemoEventOperationsState(): EventOperationsState {
+  const seed = createDemoOperationsSeed()
+
+  return createEventOperationsState({
+    event: {
+      id: seed.event.id,
+      name: seed.event.name,
+      capacity: seed.event.capacity,
+      isSynthetic: true,
+    },
+    registrationGroups: seed.registrationGroups.map((group) => ({
+      id: group.id,
+      eventId: group.eventId,
+      reference: group.reference,
+      attendeeIds: group.attendeeIds,
+      isSynthetic: true,
+    })),
+    attendees: seed.attendees.map((attendee) => ({
+      id: attendee.id,
+      eventId: attendee.eventId,
+      registrationGroupId: attendee.registrationGroupId,
+      name: attendee.name,
+      ...(attendee.assistanceRequirement ? { assistanceRequirement: attendee.assistanceRequirement } : {}),
+      isSynthetic: true,
+    })),
+    checkIns: seed.checkIns.map((checkIn) => ({
+      id: checkIn.id,
+      eventId: checkIn.eventId,
+      attendeeId: checkIn.attendeeId,
+      checkedInAt: checkIn.checkedInAt,
+      method: checkIn.method === 'ticket code' ? 'ticket-code' : 'manual',
+      actor: frontDeskActor,
+      isSynthetic: true,
+    })),
+    capacityRule: { warningThreshold: 4 },
+  })
 }
