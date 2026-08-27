@@ -46,7 +46,7 @@ export type CapacityRule = {
 export type ActivityEntry = {
   readonly id: string
   readonly eventId: string
-  readonly action: 'accountability-started' | 'accountability-status-recorded'
+  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded'
   readonly targetId: string
   readonly actor: OperationsActor
   readonly occurredAt: string
@@ -111,19 +111,34 @@ export type OperationsTransition = {
   readonly activityEntry: ActivityEntry
 }
 
+export type CheckInTransition = {
+  readonly state: EventOperationsState
+  readonly eventSnapshot: EventSnapshot
+  readonly activityEntry: ActivityEntry
+}
+
 type EventOperationsStateInput = Omit<EventOperationsState, 'activityEntries' | 'accountabilitySession'> & {
   readonly activityEntries?: readonly ActivityEntry[]
   readonly accountabilitySession?: AccountabilitySession | null
 }
 
-type StartAccountabilityCommand = {
+export type CheckInAttendeeCommand = {
+  readonly checkInId: string
+  readonly activityId: string
+  readonly attendeeId: string
+  readonly checkedInAt: string
+  readonly actor: OperationsActor
+  readonly reason?: string
+}
+
+export type StartAccountabilityCommand = {
   readonly sessionId: string
   readonly activityId: string
   readonly startedAt: string
   readonly actor: OperationsActor
 }
 
-type RecordAccountabilityCommand = {
+export type RecordAccountabilityCommand = {
   readonly attendeeId: string
   readonly status: AccountabilityStatus
   readonly activityId: string
@@ -261,6 +276,48 @@ export function getAccountabilitySnapshot(state: EventOperationsState): Accounta
     accountedFor: session.records.filter((record) => record.status === 'accounted-for').length,
     unconfirmed: session.records.filter((record) => record.status === 'unconfirmed').length,
     exemptNotPresent: session.records.filter((record) => record.status === 'exempt-not-present').length,
+  }
+}
+
+export function checkInAttendee(
+  state: EventOperationsState,
+  command: CheckInAttendeeCommand,
+): CheckInTransition {
+  invariant(state.attendees.some((attendee) => attendee.id === command.attendeeId), 'Attendee does not exist')
+  invariant(
+    !state.checkIns.some((checkIn) => checkIn.attendeeId === command.attendeeId),
+    'Attendee is already checked in',
+  )
+
+  const checkIn: CheckIn = {
+    id: command.checkInId,
+    eventId: state.event.id,
+    attendeeId: command.attendeeId,
+    checkedInAt: command.checkedInAt,
+    method: 'manual',
+    actor: cloneActor(command.actor),
+    isSynthetic: true,
+  }
+  const activityEntry: ActivityEntry = {
+    id: command.activityId,
+    eventId: state.event.id,
+    action: 'attendee-checked-in',
+    targetId: command.attendeeId,
+    actor: cloneActor(command.actor),
+    occurredAt: command.checkedInAt,
+    ...(command.reason ? { note: command.reason } : {}),
+    isSynthetic: true,
+  }
+  const nextState = createEventOperationsState({
+    ...state,
+    checkIns: [...state.checkIns, checkIn],
+    activityEntries: [...state.activityEntries, activityEntry],
+  })
+
+  return {
+    state: nextState,
+    eventSnapshot: getEventSnapshot(nextState),
+    activityEntry,
   }
 }
 
