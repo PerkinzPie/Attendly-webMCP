@@ -19,9 +19,11 @@ The scoped journeys cover:
 - organiser event creation, attendance and check-in workflows; and
 - evacuation accountability using careful, non-certifying terminology.
 
-The foundation currently provides the public application shell, deterministic
-synthetic seed data and automated project checks. WebMCP tools will be added in
-subsequent stories.
+The current application presents a realistic public organisation hub with
+searchable events, category filters, event detail and a reviewable free-ticket
+booking journey. It uses the established Attendly visual identity while all
+organisation, event and booking data remains deterministic and synthetic.
+WebMCP tools will be added in subsequent stories.
 
 ## Run locally
 
@@ -64,9 +66,12 @@ Or run an individual command:
 src/
 ├── demo/        Synthetic seed data
 ├── test/        Shared test setup
-├── App.tsx      Foundation application shell
+├── App.tsx      Event discovery and booking experience
 └── main.tsx     Browser entry point
 ```
+
+The Attendly wordmark, icon and typefaces in `public/` are authorised brand
+assets. No existing Attendly application source code is included.
 
 ## Data and safety boundaries
 
