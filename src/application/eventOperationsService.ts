@@ -2,11 +2,13 @@ import {
   checkInAttendee as applyCheckIn,
   getAccountabilitySnapshot,
   getEventSnapshot,
+  searchAttendees as findAttendees,
   recordAccountabilityStatus as applyAccountabilityStatus,
   startAccountabilitySession as applyAccountabilityStart,
   type AccountabilitySnapshot,
   type AccountabilityStatus,
   type ActivityEntry,
+  type AttendeeSearchResult,
   type EventOperationsState,
   type OperationsActor,
 } from '../domain/eventOperations'
@@ -95,6 +97,7 @@ export type EventOperationsServiceOptions = {
 
 export type EventOperationsService = {
   getSnapshot(): EventOperationsServiceResult<EventOperationsServiceSnapshot>
+  searchAttendees(query: string): EventOperationsServiceResult<readonly AttendeeSearchResult[]>
   checkInAttendee(request: CheckInAttendeeRequest): EventOperationsServiceResult<EventOperationsMutationResult>
   startAccountability(request: StartAccountabilityRequest): EventOperationsServiceResult<EventOperationsMutationResult>
   recordAccountabilityStatus(
@@ -224,6 +227,13 @@ export function createEventOperationsService(
     getSnapshot() {
       try {
         return { ok: true, data: toSnapshot(options.store.read()) }
+      } catch (error) {
+        return failure(error)
+      }
+    },
+    searchAttendees(query) {
+      try {
+        return { ok: true, data: findAttendees(options.store.read().state, query) }
       } catch (error) {
         return failure(error)
       }

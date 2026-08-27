@@ -104,6 +104,23 @@ describe('event operations application service', () => {
     expect(JSON.parse(JSON.stringify(result.data))).toEqual(result.data)
   })
 
+  it('searches attendees without updating or publishing persisted state', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const before = JSON.stringify(store.read())
+    let notifications = 0
+    service.subscribe(() => notifications += 1)
+
+    const result = service.searchAttendees('Jenkins')
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('Expected attendee search to succeed')
+    expect(result.data.map((attendee) => attendee.name)).toEqual(['Sarah Jenkins', 'Leo Jenkins'])
+    expect(JSON.stringify(store.read())).toBe(before)
+    expect(notifications).toBe(0)
+  })
+
   it('commits a check-in and its activity together before notifying subscribers', () => {
     const memory = createMemoryStorage()
     const store = createStore(memory.storage)

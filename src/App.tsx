@@ -5,6 +5,7 @@ import type {
   EventOperationsService,
   EventOperationsServiceSnapshot,
 } from './application/eventOperationsService'
+import type { AttendeeSearchResult } from './domain/eventOperations'
 import {
   demoEvents,
   demoOrganisations,
@@ -134,16 +135,25 @@ function OperationsWorkspace({
   headingRef,
   onRefresh,
   onBrowseEvents,
+  onSearchAttendees,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
   error: string | null
   headingRef: RefObject<HTMLHeadingElement | null>
   onRefresh: () => void
   onBrowseEvents: () => void
+  onSearchAttendees: EventOperationsService['searchAttendees']
 }) {
+  const [attendeeQuery, setAttendeeQuery] = useState('')
+  const [expandedAttendeeId, setExpandedAttendeeId] = useState<string | null>(null)
   const accountabilityLabel = snapshot?.activeAccountability
     ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
     : 'Not started'
+  const trimmedAttendeeQuery = attendeeQuery.trim()
+  const attendeeSearchResult = trimmedAttendeeQuery ? onSearchAttendees(trimmedAttendeeQuery) : null
+  const attendeeResults: readonly AttendeeSearchResult[] = attendeeSearchResult?.ok
+    ? attendeeSearchResult.data
+    : []
 
   return (
     <section className="operations-workspace" aria-labelledby="operations-title">
@@ -165,6 +175,83 @@ function OperationsWorkspace({
               <div><dt>Not arrived</dt><dd>{snapshot.notArrivedCount}</dd></div>
               <div><dt>Capacity remaining</dt><dd>{snapshot.capacityRemaining}</dd></div>
             </dl>
+
+            <section className="attendee-lookup" aria-labelledby="attendee-lookup-title">
+              <div className="attendee-lookup-heading">
+                <h2 id="attendee-lookup-title">Attendees</h2>
+                {attendeeSearchResult?.ok ? (
+                  <span aria-live="polite">
+                    {attendeeResults.length} {attendeeResults.length === 1 ? 'match' : 'matches'}
+                  </span>
+                ) : null}
+              </div>
+              <SearchField
+                label="Search attendees"
+                placeholder="Search attendees"
+                value={attendeeQuery}
+                onChange={setAttendeeQuery}
+              />
+
+              {attendeeSearchResult && !attendeeSearchResult.ok ? (
+                <p className="attendee-search-message" role="alert">Attendees could not be loaded. Please try again.</p>
+              ) : null}
+
+              {attendeeSearchResult?.ok && attendeeResults.length === 0 ? (
+                <p className="attendee-search-message">No attendees found.</p>
+              ) : null}
+
+              {attendeeResults.length > 0 ? (
+                <ul className="attendee-results">
+                  {attendeeResults.map((attendee) => {
+                    const isExpanded = expandedAttendeeId === attendee.attendeeId
+                    const registrationPanelId = `registration-${attendee.attendeeId}`
+                    return (
+                      <li key={attendee.attendeeId}>
+                        <article className="attendee-result">
+                          <div className="attendee-result-summary">
+                            <div>
+                              <h3>{attendee.name}</h3>
+                              <p>Registration {attendee.registrationGroup.reference}</p>
+                            </div>
+                            <div className="attendee-result-actions">
+                              <span className={`check-in-state ${attendee.checkIn.status}`}>
+                                {attendee.checkIn.status === 'checked-in' ? 'Checked in' : 'Not arrived'}
+                              </span>
+                              <button
+                                className="text-action"
+                                type="button"
+                                aria-controls={registrationPanelId}
+                                aria-expanded={isExpanded}
+                                aria-label={`${isExpanded ? 'Hide' : 'View'} registration for ${attendee.name}`}
+                                onClick={() => setExpandedAttendeeId(isExpanded ? null : attendee.attendeeId)}
+                              >
+                                {isExpanded ? 'Hide registration' : 'View registration'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded ? (
+                            <div className="registration-group" id={registrationPanelId}>
+                              <h4>Registration {attendee.registrationGroup.reference}</h4>
+                              <ul>
+                                {attendee.groupMembers.map((member) => (
+                                  <li key={member.attendeeId}>
+                                    <span>{member.name}</span>
+                                    <span className={`check-in-state ${member.checkInStatus}`}>
+                                      {member.checkInStatus === 'checked-in' ? 'Checked in' : 'Not arrived'}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </article>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : null}
+            </section>
 
             <div className="workspace-layout">
               <section className="workspace-panel" aria-labelledby="capacity-watch-title">
@@ -403,6 +490,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             headingRef={operationsHeadingRef}
             onRefresh={refreshOperations}
             onBrowseEvents={showDirectory}
+            onSearchAttendees={service.searchAttendees}
           />
         ) : selectedOrganisation ? (
           <>

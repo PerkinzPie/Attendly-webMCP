@@ -97,6 +97,35 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByRole('button', { name: 'Browse public events' })).toBeInTheDocument()
   })
 
+  it('finds attendees and expands their grouped registration', () => {
+    render(<App operationsService={createTestOperationsService()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    const search = screen.getByPlaceholderText('Search attendees')
+
+    fireEvent.change(search, { target: { value: 'Sarah Jenkins' } })
+
+    expect(screen.getByText('1 match')).toBeInTheDocument()
+    const sarahResult = screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' }).closest('article')
+    expect(sarahResult).not.toBeNull()
+    expect(within(sarahResult as HTMLElement).getByText('Registration RIV-001')).toBeInTheDocument()
+    expect(within(sarahResult as HTMLElement).getByText('Not arrived')).toBeInTheDocument()
+
+    fireEvent.click(within(sarahResult as HTMLElement).getByRole('button', { name: 'View registration for Sarah Jenkins' }))
+
+    expect(within(sarahResult as HTMLElement).getByRole('heading', { level: 4, name: 'Registration RIV-001' })).toBeInTheDocument()
+    expect(within(sarahResult as HTMLElement).getByText('Leo Jenkins')).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'Jenkins' } })
+
+    expect(screen.getByText('2 matches')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Leo Jenkins' })).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'Nobody Here' } })
+
+    expect(screen.getByText('No attendees found.')).toBeInTheDocument()
+  })
+
   it('updates live totals and announces shared service changes without a page refresh', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)

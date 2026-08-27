@@ -5,6 +5,7 @@ import {
   getAccountabilitySnapshot,
   getEventSnapshot,
   recordAccountabilityStatus,
+  searchAttendees,
   startAccountabilitySession,
   type OperationsActor,
 } from './eventOperations'
@@ -73,6 +74,35 @@ describe('event operations domain', () => {
         { ...firstCheckIn, id: 'chk_duplicate_attendee' },
       ],
     })).toThrow('is checked in more than once')
+  })
+
+  it('finds an exact attendee with their check-in and registration group', () => {
+    const results = searchAttendees(createDemoEventOperationsState(), ' Sarah Jenkins ')
+
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({
+      attendeeId: 'att_sarah_jenkins',
+      name: 'Sarah Jenkins',
+      registrationGroup: { id: 'reg_jenkins_family', reference: 'RIV-001' },
+      checkIn: { status: 'not-arrived', checkedInAt: null },
+    })
+    expect(results[0].groupMembers).toEqual([
+      { attendeeId: 'att_sarah_jenkins', name: 'Sarah Jenkins', checkInStatus: 'not-arrived' },
+      { attendeeId: 'att_leo_jenkins', name: 'Leo Jenkins', checkInStatus: 'not-arrived' },
+    ])
+  })
+
+  it('ranks partial attendee matches without changing event state', () => {
+    const state = createDemoEventOperationsState()
+    const before = JSON.stringify(state)
+
+    const surnameResults = searchAttendees(state, 'jenkins')
+    const prefixResults = searchAttendees(state, 'sa')
+
+    expect(surnameResults.map((result) => result.name)).toEqual(['Sarah Jenkins', 'Leo Jenkins'])
+    expect(prefixResults[0].name).toBe('Sarah Jenkins')
+    expect(prefixResults.map((result) => result.name)).toEqual(['Sarah Jenkins', 'Isaac Turner'])
+    expect(JSON.stringify(state)).toBe(before)
   })
 
   it('starts accountability with only checked-in attendees marked unconfirmed', () => {

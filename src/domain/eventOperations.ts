@@ -104,6 +104,24 @@ export type AccountabilitySnapshot = {
   readonly exemptNotPresent: number
 }
 
+export type AttendeeSearchResult = {
+  readonly attendeeId: string
+  readonly name: string
+  readonly registrationGroup: {
+    readonly id: string
+    readonly reference: string
+  }
+  readonly checkIn: {
+    readonly status: 'checked-in' | 'not-arrived'
+    readonly checkedInAt: string | null
+  }
+  readonly groupMembers: readonly {
+    readonly attendeeId: string
+    readonly name: string
+    readonly checkInStatus: 'checked-in' | 'not-arrived'
+  }[]
+}
+
 export type OperationsTransition = {
   readonly state: EventOperationsState
   readonly eventSnapshot: EventSnapshot
@@ -277,6 +295,59 @@ export function getAccountabilitySnapshot(state: EventOperationsState): Accounta
     unconfirmed: session.records.filter((record) => record.status === 'unconfirmed').length,
     exemptNotPresent: session.records.filter((record) => record.status === 'exempt-not-present').length,
   }
+}
+
+export function searchAttendees(
+  state: EventOperationsState,
+  rawQuery: string,
+): readonly AttendeeSearchResult[] {
+  const query = rawQuery.trim().toLocaleLowerCase('en-GB')
+  if (!query) return []
+
+  const groupsById = new Map(state.registrationGroups.map((group) => [group.id, group]))
+  const attendeesById = new Map(state.attendees.map((attendee) => [attendee.id, attendee]))
+  const checkInsByAttendeeId = new Map(state.checkIns.map((checkIn) => [checkIn.attendeeId, checkIn]))
+
+  const matchRank = (name: string) => {
+    const normalisedName = name.toLocaleLowerCase('en-GB')
+    if (normalisedName === query) return 0
+    if (normalisedName.startsWith(query)) return 1
+    if (normalisedName.split(/\s+/).some((part) => part.startsWith(query))) return 2
+    if (normalisedName.includes(query)) return 3
+    return null
+  }
+
+  return state.attendees
+    .map((attendee, index) => ({ attendee, index, rank: matchRank(attendee.name) }))
+    .filter((match): match is typeof match & { rank: number } => match.rank !== null)
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map(({ attendee }) => {
+      const group = groupsById.get(attendee.registrationGroupId)
+      invariant(group, `Attendee ${attendee.id} has no registration group`)
+      const checkIn = checkInsByAttendeeId.get(attendee.id)
+
+      return {
+        attendeeId: attendee.id,
+        name: attendee.name,
+        registrationGroup: {
+          id: group.id,
+          reference: group.reference,
+        },
+        checkIn: {
+          status: checkIn ? 'checked-in' : 'not-arrived',
+          checkedInAt: checkIn?.checkedInAt ?? null,
+        },
+        groupMembers: group.attendeeIds.map((attendeeId) => {
+          const member = attendeesById.get(attendeeId)
+          invariant(member, `Registration group ${group.id} contains an unknown attendee`)
+          return {
+            attendeeId: member.id,
+            name: member.name,
+            checkInStatus: checkInsByAttendeeId.has(member.id) ? 'checked-in' : 'not-arrived',
+          }
+        }),
+      }
+    })
 }
 
 export function checkInAttendee(
