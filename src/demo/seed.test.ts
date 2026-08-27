@@ -32,7 +32,7 @@ describe('deterministic event-operations seed', () => {
 
     expect(seed.registrationGroups.some((group) => group.attendeeIds.length > 1)).toBe(true)
     expect(seed.attendees).toContainEqual(expect.objectContaining({
-      assistanceRequirement: expect.stringMatching(/^Synthetic example:/),
+      assistanceRequirement: 'Step-free access and a seat near the entrance.',
       isSynthetic: true,
     }))
     expect(seed.attendanceAnomalies).toContainEqual(expect.objectContaining({
@@ -49,7 +49,7 @@ describe('deterministic event-operations seed', () => {
 
     expect(seed.isSynthetic).toBe(true)
     expect(seed.attendees.every((attendee) => attendee.isSynthetic)).toBe(true)
-    expect(seed.attendees.every((attendee) => attendee.email.endsWith('.example.test'))).toBe(true)
+    expect(seed.attendees.every((attendee) => attendee.email.endsWith('@example.test'))).toBe(true)
     expect(seed.registrationGroups.every((group) => group.isSynthetic)).toBe(true)
     expect(seed.checkIns.every((checkIn) => checkIn.isSynthetic)).toBe(true)
     expect(seed.attendanceExceptions.every((exception) => exception.isSynthetic)).toBe(true)

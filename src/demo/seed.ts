@@ -71,7 +71,7 @@ export type DemoCheckIn = {
   attendeeId: string
   checkedInAt: string
   method: 'ticket code' | 'manual'
-  actor: 'Synthetic front-desk volunteer'
+  actor: 'Front-desk volunteer'
   isSynthetic: true
 }
 
@@ -335,8 +335,8 @@ const operationsEvent: DemoEvent = event({
   id: 'evt_riverside_community_workshop',
   organisationId: 'org_lantern_rooms',
   name: 'Riverside Community Workshop',
-  summary: 'A practical community workshop used for repeatable event-operations demonstrations.',
-  description: 'This explicitly synthetic event supports check-in, attendance and accountability rehearsal without using customer data.',
+  summary: 'A practical community workshop with registration, check-in and accountability.',
+  description: 'A hands-on community workshop supported by live check-in, attendance and accountability tools.',
   startsAt: '2026-09-05T18:30:00+01:00',
   dateLabel: 'Saturday 5 September 2026',
   dateShort: { day: '05', month: 'SEP' },
@@ -354,7 +354,7 @@ const operationsAttendees: readonly DemoAttendee[] = [
     eventId: operationsEvent.id,
     registrationGroupId: 'reg_jenkins_family',
     name: 'Sarah Jenkins',
-    email: 'sarah.jenkins@attendly-demo.example.test',
+    email: 'sarah.jenkins@example.test',
     isSynthetic: true,
   },
   {
@@ -362,7 +362,7 @@ const operationsAttendees: readonly DemoAttendee[] = [
     eventId: operationsEvent.id,
     registrationGroupId: 'reg_jenkins_family',
     name: 'Leo Jenkins',
-    email: 'leo.jenkins@attendly-demo.example.test',
+    email: 'leo.jenkins@example.test',
     isSynthetic: true,
   },
   {
@@ -370,7 +370,7 @@ const operationsAttendees: readonly DemoAttendee[] = [
     eventId: operationsEvent.id,
     registrationGroupId: 'reg_patel_family',
     name: 'Amina Patel',
-    email: 'amina.patel@attendly-demo.example.test',
+    email: 'amina.patel@example.test',
     isSynthetic: true,
   },
   {
@@ -378,7 +378,7 @@ const operationsAttendees: readonly DemoAttendee[] = [
     eventId: operationsEvent.id,
     registrationGroupId: 'reg_patel_family',
     name: 'Elliot Patel',
-    email: 'elliot.patel@attendly-demo.example.test',
+    email: 'elliot.patel@example.test',
     isSynthetic: true,
   },
   {
@@ -386,53 +386,53 @@ const operationsAttendees: readonly DemoAttendee[] = [
     eventId: operationsEvent.id,
     registrationGroupId: 'reg_jamie_chen',
     name: 'Jamie Chen',
-    email: 'jamie.chen@attendly-demo.example.test',
-    assistanceRequirement: 'Synthetic example: step-free access and a seat near the entrance.',
+    email: 'jamie.chen@example.test',
+    assistanceRequirement: 'Step-free access and a seat near the entrance.',
     isSynthetic: true,
   },
   {
     id: 'att_maya_thompson', eventId: operationsEvent.id, registrationGroupId: 'reg_maya_thompson',
-    name: 'Maya Thompson', email: 'maya.thompson@attendly-demo.example.test', isSynthetic: true,
+    name: 'Maya Thompson', email: 'maya.thompson@example.test', isSynthetic: true,
   },
   {
     id: 'att_oscar_williams', eventId: operationsEvent.id, registrationGroupId: 'reg_oscar_williams',
-    name: 'Oscar Williams', email: 'oscar.williams@attendly-demo.example.test', isSynthetic: true,
+    name: 'Oscar Williams', email: 'oscar.williams@example.test', isSynthetic: true,
   },
   {
     id: 'att_layla_brown', eventId: operationsEvent.id, registrationGroupId: 'reg_layla_brown',
-    name: 'Layla Brown', email: 'layla.brown@attendly-demo.example.test', isSynthetic: true,
+    name: 'Layla Brown', email: 'layla.brown@example.test', isSynthetic: true,
   },
   {
     id: 'att_noah_evans', eventId: operationsEvent.id, registrationGroupId: 'reg_noah_evans',
-    name: 'Noah Evans', email: 'noah.evans@attendly-demo.example.test', isSynthetic: true,
+    name: 'Noah Evans', email: 'noah.evans@example.test', isSynthetic: true,
   },
   {
     id: 'att_chloe_martin', eventId: operationsEvent.id, registrationGroupId: 'reg_chloe_martin',
-    name: 'Chloe Martin', email: 'chloe.martin@attendly-demo.example.test', isSynthetic: true,
+    name: 'Chloe Martin', email: 'chloe.martin@example.test', isSynthetic: true,
   },
   {
     id: 'att_ethan_taylor', eventId: operationsEvent.id, registrationGroupId: 'reg_ethan_taylor',
-    name: 'Ethan Taylor', email: 'ethan.taylor@attendly-demo.example.test', isSynthetic: true,
+    name: 'Ethan Taylor', email: 'ethan.taylor@example.test', isSynthetic: true,
   },
   {
     id: 'att_grace_wilson', eventId: operationsEvent.id, registrationGroupId: 'reg_grace_wilson',
-    name: 'Grace Wilson', email: 'grace.wilson@attendly-demo.example.test', isSynthetic: true,
+    name: 'Grace Wilson', email: 'grace.wilson@example.test', isSynthetic: true,
   },
   {
     id: 'att_hugo_clarke', eventId: operationsEvent.id, registrationGroupId: 'reg_hugo_clarke',
-    name: 'Hugo Clarke', email: 'hugo.clarke@attendly-demo.example.test', isSynthetic: true,
+    name: 'Hugo Clarke', email: 'hugo.clarke@example.test', isSynthetic: true,
   },
   {
     id: 'att_freya_hughes', eventId: operationsEvent.id, registrationGroupId: 'reg_freya_hughes',
-    name: 'Freya Hughes', email: 'freya.hughes@attendly-demo.example.test', isSynthetic: true,
+    name: 'Freya Hughes', email: 'freya.hughes@example.test', isSynthetic: true,
   },
   {
     id: 'att_isaac_turner', eventId: operationsEvent.id, registrationGroupId: 'reg_isaac_turner',
-    name: 'Isaac Turner', email: 'isaac.turner@attendly-demo.example.test', isSynthetic: true,
+    name: 'Isaac Turner', email: 'isaac.turner@example.test', isSynthetic: true,
   },
   {
     id: 'att_priya_shah', eventId: operationsEvent.id, registrationGroupId: 'reg_priya_shah',
-    name: 'Priya Shah', email: 'priya.shah@attendly-demo.example.test', isSynthetic: true,
+    name: 'Priya Shah', email: 'priya.shah@example.test', isSynthetic: true,
   },
 ]
 
@@ -446,7 +446,7 @@ const operationsRegistrationGroups: readonly DemoRegistrationGroup[] = [
 ].map(([id, attendeeIds], index) => ({
   id,
   eventId: operationsEvent.id,
-  reference: `RIV-DEMO-${String(index + 1).padStart(3, '0')}`,
+  reference: `RIV-${String(index + 1).padStart(3, '0')}`,
   leadAttendeeId: attendeeIds[0],
   attendeeIds,
   isSynthetic: true as const,
@@ -456,7 +456,7 @@ const operationsRegistrationGroups: readonly DemoRegistrationGroup[] = [
     .map((attendee, index) => ({
       id: attendee.registrationGroupId,
       eventId: operationsEvent.id,
-      reference: `RIV-DEMO-${String(index + 3).padStart(3, '0')}`,
+      reference: `RIV-${String(index + 3).padStart(3, '0')}`,
       leadAttendeeId: attendee.id,
       attendeeIds: [attendee.id],
       isSynthetic: true as const,
@@ -485,7 +485,7 @@ const operationsCheckIns: readonly DemoCheckIn[] = checkedInAttendees.map((atten
   attendeeId,
   checkedInAt: `2026-09-05T18:${String(index + 2).padStart(2, '0')}:00+01:00`,
   method: 'ticket code',
-  actor: 'Synthetic front-desk volunteer',
+  actor: 'Front-desk volunteer',
   isSynthetic: true,
 }))
 
@@ -494,7 +494,7 @@ const operationsAttendanceExceptions: readonly DemoAttendanceException[] = [
     id: 'exc_sarah_unrecognised_code',
     eventId: operationsEvent.id,
     kind: 'unrecognised ticket code',
-    attemptedCode: 'RIV-DEMO-EXPIRED-SARAH',
+    attemptedCode: 'RIV-EXPIRED-SARAH',
     occurredAt: '2026-09-05T18:16:00+01:00',
     status: 'unresolved',
     suggestedAttendeeId: 'att_sarah_jenkins',
@@ -538,7 +538,7 @@ export function createDemoOperationsSeed(): DemoOperationsSeed {
 
 const frontDeskActor: OperationsActor = {
   id: 'actor_front_desk_volunteer',
-  displayName: 'Synthetic front-desk volunteer',
+  displayName: 'Front-desk volunteer',
   channel: 'human-ui',
   isSynthetic: true,
 }
