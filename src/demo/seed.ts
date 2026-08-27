@@ -44,6 +44,69 @@ export type DemoEvent = {
   isSynthetic: true
 }
 
+export type DemoRegistrationGroup = {
+  id: string
+  eventId: string
+  reference: string
+  leadAttendeeId: string
+  attendeeIds: string[]
+  isSynthetic: true
+}
+
+export type DemoAttendee = {
+  id: string
+  eventId: string
+  registrationGroupId: string
+  name: string
+  email: string
+  assistanceRequirement?: string
+  isSynthetic: true
+}
+
+export type DemoCheckIn = {
+  id: string
+  eventId: string
+  attendeeId: string
+  checkedInAt: string
+  method: 'ticket code' | 'manual'
+  actor: 'Synthetic front-desk volunteer'
+  isSynthetic: true
+}
+
+export type DemoAttendanceException = {
+  id: string
+  eventId: string
+  kind: 'unrecognised ticket code'
+  attemptedCode: string
+  occurredAt: string
+  status: 'unresolved'
+  suggestedAttendeeId: string
+  isSynthetic: true
+}
+
+export type DemoAttendanceAnomaly = {
+  id: string
+  eventId: string
+  kind: 'near capacity'
+  severity: 'warning'
+  registeredAttendees: number
+  capacity: number
+  remainingPlaces: number
+  warningThreshold: number
+  isSynthetic: true
+}
+
+export type DemoOperationsSeed = {
+  version: 1
+  event: DemoEvent
+  registrationGroups: DemoRegistrationGroup[]
+  attendees: DemoAttendee[]
+  checkIns: DemoCheckIn[]
+  attendanceExceptions: DemoAttendanceException[]
+  attendanceAnomalies: DemoAttendanceAnomaly[]
+  isSynthetic: true
+}
+
 export const organisationTypes: readonly OrganisationType[] = [
   'School',
   'PTA',
@@ -265,3 +328,208 @@ export const demoEvents: readonly DemoEvent[] = [
 
 export const getOrganisationEvents = (organisationId: string): readonly DemoEvent[] =>
   demoEvents.filter((item) => item.organisationId === organisationId)
+
+const operationsEvent: DemoEvent = event({
+  id: 'evt_riverside_community_workshop',
+  organisationId: 'org_lantern_rooms',
+  name: 'Riverside Community Workshop',
+  summary: 'A practical community workshop used for repeatable event-operations demonstrations.',
+  description: 'This explicitly synthetic event supports check-in, attendance and accountability rehearsal without using customer data.',
+  startsAt: '2026-09-05T18:30:00+01:00',
+  dateLabel: 'Saturday 5 September 2026',
+  dateShort: { day: '05', month: 'SEP' },
+  timeLabel: '18:30–20:30',
+  venue: 'Riverside Community Hall',
+  category: 'Workshop',
+  capacity: 20,
+  reservedTickets: 16,
+  bookingClosesLabel: 'Bookings closed 5 September at 17:30',
+})
+
+const operationsAttendees: readonly DemoAttendee[] = [
+  {
+    id: 'att_sarah_jenkins',
+    eventId: operationsEvent.id,
+    registrationGroupId: 'reg_jenkins_family',
+    name: 'Sarah Jenkins',
+    email: 'sarah.jenkins@attendly-demo.example.test',
+    isSynthetic: true,
+  },
+  {
+    id: 'att_leo_jenkins',
+    eventId: operationsEvent.id,
+    registrationGroupId: 'reg_jenkins_family',
+    name: 'Leo Jenkins',
+    email: 'leo.jenkins@attendly-demo.example.test',
+    isSynthetic: true,
+  },
+  {
+    id: 'att_amina_patel',
+    eventId: operationsEvent.id,
+    registrationGroupId: 'reg_patel_family',
+    name: 'Amina Patel',
+    email: 'amina.patel@attendly-demo.example.test',
+    isSynthetic: true,
+  },
+  {
+    id: 'att_elliot_patel',
+    eventId: operationsEvent.id,
+    registrationGroupId: 'reg_patel_family',
+    name: 'Elliot Patel',
+    email: 'elliot.patel@attendly-demo.example.test',
+    isSynthetic: true,
+  },
+  {
+    id: 'att_jamie_chen',
+    eventId: operationsEvent.id,
+    registrationGroupId: 'reg_jamie_chen',
+    name: 'Jamie Chen',
+    email: 'jamie.chen@attendly-demo.example.test',
+    assistanceRequirement: 'Synthetic example: step-free access and a seat near the entrance.',
+    isSynthetic: true,
+  },
+  {
+    id: 'att_maya_thompson', eventId: operationsEvent.id, registrationGroupId: 'reg_maya_thompson',
+    name: 'Maya Thompson', email: 'maya.thompson@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_oscar_williams', eventId: operationsEvent.id, registrationGroupId: 'reg_oscar_williams',
+    name: 'Oscar Williams', email: 'oscar.williams@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_layla_brown', eventId: operationsEvent.id, registrationGroupId: 'reg_layla_brown',
+    name: 'Layla Brown', email: 'layla.brown@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_noah_evans', eventId: operationsEvent.id, registrationGroupId: 'reg_noah_evans',
+    name: 'Noah Evans', email: 'noah.evans@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_chloe_martin', eventId: operationsEvent.id, registrationGroupId: 'reg_chloe_martin',
+    name: 'Chloe Martin', email: 'chloe.martin@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_ethan_taylor', eventId: operationsEvent.id, registrationGroupId: 'reg_ethan_taylor',
+    name: 'Ethan Taylor', email: 'ethan.taylor@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_grace_wilson', eventId: operationsEvent.id, registrationGroupId: 'reg_grace_wilson',
+    name: 'Grace Wilson', email: 'grace.wilson@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_hugo_clarke', eventId: operationsEvent.id, registrationGroupId: 'reg_hugo_clarke',
+    name: 'Hugo Clarke', email: 'hugo.clarke@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_freya_hughes', eventId: operationsEvent.id, registrationGroupId: 'reg_freya_hughes',
+    name: 'Freya Hughes', email: 'freya.hughes@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_isaac_turner', eventId: operationsEvent.id, registrationGroupId: 'reg_isaac_turner',
+    name: 'Isaac Turner', email: 'isaac.turner@attendly-demo.example.test', isSynthetic: true,
+  },
+  {
+    id: 'att_priya_shah', eventId: operationsEvent.id, registrationGroupId: 'reg_priya_shah',
+    name: 'Priya Shah', email: 'priya.shah@attendly-demo.example.test', isSynthetic: true,
+  },
+]
+
+const groupedRegistrationAttendeeIds = new Map<string, string[]>([
+  ['reg_jenkins_family', ['att_sarah_jenkins', 'att_leo_jenkins']],
+  ['reg_patel_family', ['att_amina_patel', 'att_elliot_patel']],
+])
+
+const operationsRegistrationGroups: readonly DemoRegistrationGroup[] = [
+  ...groupedRegistrationAttendeeIds.entries(),
+].map(([id, attendeeIds], index) => ({
+  id,
+  eventId: operationsEvent.id,
+  reference: `RIV-DEMO-${String(index + 1).padStart(3, '0')}`,
+  leadAttendeeId: attendeeIds[0],
+  attendeeIds,
+  isSynthetic: true as const,
+})).concat(
+  operationsAttendees
+    .filter((attendee) => !groupedRegistrationAttendeeIds.has(attendee.registrationGroupId))
+    .map((attendee, index) => ({
+      id: attendee.registrationGroupId,
+      eventId: operationsEvent.id,
+      reference: `RIV-DEMO-${String(index + 3).padStart(3, '0')}`,
+      leadAttendeeId: attendee.id,
+      attendeeIds: [attendee.id],
+      isSynthetic: true as const,
+    })),
+)
+
+const checkedInAttendees = [
+  'att_amina_patel',
+  'att_elliot_patel',
+  'att_jamie_chen',
+  'att_maya_thompson',
+  'att_oscar_williams',
+  'att_layla_brown',
+  'att_noah_evans',
+  'att_chloe_martin',
+  'att_ethan_taylor',
+  'att_grace_wilson',
+  'att_hugo_clarke',
+  'att_freya_hughes',
+  'att_isaac_turner',
+] as const
+
+const operationsCheckIns: readonly DemoCheckIn[] = checkedInAttendees.map((attendeeId, index) => ({
+  id: `chk_${attendeeId.slice(4)}`,
+  eventId: operationsEvent.id,
+  attendeeId,
+  checkedInAt: `2026-09-05T18:${String(index + 2).padStart(2, '0')}:00+01:00`,
+  method: 'ticket code',
+  actor: 'Synthetic front-desk volunteer',
+  isSynthetic: true,
+}))
+
+const operationsAttendanceExceptions: readonly DemoAttendanceException[] = [
+  {
+    id: 'exc_sarah_unrecognised_code',
+    eventId: operationsEvent.id,
+    kind: 'unrecognised ticket code',
+    attemptedCode: 'RIV-DEMO-EXPIRED-SARAH',
+    occurredAt: '2026-09-05T18:16:00+01:00',
+    status: 'unresolved',
+    suggestedAttendeeId: 'att_sarah_jenkins',
+    isSynthetic: true,
+  },
+]
+
+const operationsAttendanceAnomalies: readonly DemoAttendanceAnomaly[] = [
+  {
+    id: 'anm_riverside_near_capacity',
+    eventId: operationsEvent.id,
+    kind: 'near capacity',
+    severity: 'warning',
+    registeredAttendees: operationsAttendees.length,
+    capacity: operationsEvent.capacity,
+    remainingPlaces: operationsEvent.capacity - operationsAttendees.length,
+    warningThreshold: 4,
+    isSynthetic: true,
+  },
+]
+
+/**
+ * Returns a fresh, deterministic operations dataset for each demo reset.
+ * The fixture is independent of all private Attendly systems and customer data.
+ */
+export function createDemoOperationsSeed(): DemoOperationsSeed {
+  return {
+    version: 1,
+    event: { ...operationsEvent, dateShort: { ...operationsEvent.dateShort } },
+    registrationGroups: operationsRegistrationGroups.map((group) => ({
+      ...group,
+      attendeeIds: [...group.attendeeIds],
+    })),
+    attendees: operationsAttendees.map((attendee) => ({ ...attendee })),
+    checkIns: operationsCheckIns.map((checkIn) => ({ ...checkIn })),
+    attendanceExceptions: operationsAttendanceExceptions.map((exception) => ({ ...exception })),
+    attendanceAnomalies: operationsAttendanceAnomalies.map((anomaly) => ({ ...anomaly })),
+    isSynthetic: true,
+  }
+}

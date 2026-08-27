@@ -29,6 +29,8 @@ Tests use Vitest, jsdom, and Testing Library. Exercise user-visible behaviour th
 
 Use Conventional Commits, matching repository history: `feat: add event search tool`, `fix: preserve booking review state`, or `test: cover empty results`. Keep commits focused. Pull requests should explain the user outcome, link the relevant Linear issue, list validation performed, and include desktop/mobile screenshots for visible changes.
 
+After completing and validating each user story, create its focused Conventional Commit. Include the full Linear story URL in the commit body or footer as a reference.
+
 ## Security & Data Boundaries
 
 Never copy private Attendly source, customer records, credentials, or production endpoints. All committed organisations, people, bookings, and events must be clearly synthetic. Put configuration examples in `.env.example`; never commit live secrets.

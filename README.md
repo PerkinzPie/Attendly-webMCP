@@ -28,6 +28,10 @@ site uses the established Attendly visual identity while all organisation,
 event and booking data remains deterministic and synthetic. WebMCP tools will
 be added in subsequent stories.
 
+The seed module also provides a reset-ready operations scenario for the
+synthetic “Riverside Community Workshop”: capacity 20, 16 registrations, 13
+initial check-ins, and fixed exception and anomaly records for rehearsal.
+
 ## Run locally
 
 ### Prerequisites
