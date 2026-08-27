@@ -19,11 +19,14 @@ The scoped journeys cover:
 - organiser event creation, attendance and check-in workflows; and
 - evacuation accountability using careful, non-certifying terminology.
 
-The current application presents a realistic public organisation hub with
-searchable events, category filters, event detail and a reviewable free-ticket
-booking journey. It uses the established Attendly visual identity while all
-organisation, event and booking data remains deterministic and synthetic.
-WebMCP tools will be added in subsequent stories.
+The current application presents a realistic public directory where
+organisations are the primary entities and each organisation owns its upcoming
+events. Six synthetic schools, PTAs, churches, venues, charities and clubs host
+18 searchable events. Visitors can open an organisation, filter its events,
+view event details and complete a reviewable free-ticket booking journey. The
+site uses the established Attendly visual identity while all organisation,
+event and booking data remains deterministic and synthetic. WebMCP tools will
+be added in subsequent stories.
 
 ## Run locally
 
