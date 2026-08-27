@@ -15,6 +15,7 @@ export function getDemoEventOperationsService(): EventOperationsService {
     authorise: (actor) => actor.isSynthetic,
     now: () => new Date().toISOString(),
     createId: (kind) => `${kind}_${globalThis.crypto.randomUUID()}`,
+    resetState: createDemoEventOperationsState,
   })
 
   return browserService

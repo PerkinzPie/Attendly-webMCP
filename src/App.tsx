@@ -22,6 +22,13 @@ type OrganisationFilter = 'All organisations' | OrganisationType
 type EventFilter = 'All events' | EventCategory
 type AppSurface = 'directory' | 'operations'
 
+const demoUiActor = {
+  id: 'actor_demo_demonstrator',
+  displayName: 'Synthetic demo demonstrator',
+  channel: 'human-ui',
+  isSynthetic: true,
+} as const
+
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
     arrow: <path d="M5 12h14m-5-5 5 5-5 5" />,
@@ -211,6 +218,9 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     initialOperationsResult.ok ? null : `${initialOperationsResult.error.message} ${initialOperationsResult.error.remediation}`,
   )
   const [operationsAnnouncement, setOperationsAnnouncement] = useState('')
+  const [resetRequested, setResetRequested] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+  const [resetFeedback, setResetFeedback] = useState<string | null>(null)
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null)
   const [organisationQuery, setOrganisationQuery] = useState('')
   const [organisationFilter, setOrganisationFilter] = useState<OrganisationFilter>('All organisations')
@@ -222,7 +232,10 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const [bookingName, setBookingName] = useState('')
   const [bookingEmail, setBookingEmail] = useState('')
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const resetDialogRef = useRef<HTMLDialogElement>(null)
+  const resetReturnEventRef = useRef<DemoEvent | null>(null)
   const operationsHeadingRef = useRef<HTMLHeadingElement>(null)
+  const directoryHeadingRef = useRef<HTMLHeadingElement>(null)
 
   const selectedOrganisation = demoOrganisations.find((item) => item.id === selectedOrganisationId) ?? null
   const organisationEvents = useMemo(
@@ -258,6 +271,13 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     if (typeof dialog.showModal === 'function') dialog.showModal()
     else dialog.setAttribute('open', '')
   }, [selectedEvent])
+
+  useEffect(() => {
+    const dialog = resetDialogRef.current
+    if (!resetRequested || !dialog || dialog.open) return
+    if (typeof dialog.showModal === 'function') dialog.showModal()
+    else dialog.setAttribute('open', '')
+  }, [resetRequested])
 
   useEffect(() => {
     return service.subscribe((snapshot) => {
@@ -321,6 +341,61 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     )
   }
 
+  const requestReset = () => {
+    resetReturnEventRef.current = selectedEvent
+    setSelectedEvent(null)
+    setResetError(null)
+    setResetFeedback(null)
+    setResetRequested(true)
+  }
+
+  const handleResetDialogClose = () => {
+    setResetRequested(false)
+    setResetError(null)
+    const returnEvent = resetReturnEventRef.current
+    resetReturnEventRef.current = null
+    if (returnEvent) setSelectedEvent(returnEvent)
+  }
+
+  const closeResetDialog = () => {
+    const dialog = resetDialogRef.current
+    if (dialog && typeof dialog.close === 'function') dialog.close()
+    else {
+      dialog?.removeAttribute('open')
+      handleResetDialogClose()
+    }
+  }
+
+  const confirmReset = () => {
+    const result = service.resetDemo({ actor: demoUiActor })
+    if (!result.ok) {
+      const message = `${result.error.message} ${result.error.remediation}`
+      setResetError(message)
+      setOperationsAnnouncement(message)
+      return
+    }
+
+    const message = 'Demo reset complete. The deterministic synthetic data is ready.'
+    resetReturnEventRef.current = null
+    setSurface('directory')
+    setSelectedOrganisationId(null)
+    setOrganisationQuery('')
+    setOrganisationFilter('All organisations')
+    setEventQuery('')
+    setEventFilter('All events')
+    setSelectedEvent(null)
+    setBookingStage('event')
+    setTicketCount(2)
+    setBookingName('')
+    setBookingEmail('')
+    setOperationsSnapshot(result.data)
+    setOperationsError(null)
+    setResetFeedback(message)
+    setOperationsAnnouncement(message)
+    closeResetDialog()
+    requestAnimationFrame(() => directoryHeadingRef.current?.focus())
+  }
+
   const openEvent = (item: DemoEvent) => {
     setSelectedEvent(item)
     setBookingStage('event')
@@ -357,10 +432,15 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             <button type="button" aria-current={surface === 'directory' ? 'page' : undefined} onClick={showDirectory}>Public events</button>
             <button type="button" aria-current={surface === 'operations' ? 'page' : undefined} onClick={showOperations}>Live operations</button>
           </nav>
-          <span className="header-context"><span aria-hidden="true" /> Synthetic demo</span>
+          <div className="header-utilities">
+            <span className="header-context"><span aria-hidden="true" /> Synthetic demo</span>
+            <button className="demo-reset-button" type="button" onClick={requestReset}>Reset demo</button>
+          </div>
         </div>
         <div className="demo-banner" role="note">All people, organisations and events in this demonstration are fictional and use synthetic data.</div>
       </header>
+
+      {resetFeedback ? <div className="reset-feedback" aria-live="polite"><Icon name="check" /> {resetFeedback}</div> : null}
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{operationsAnnouncement}</p>
 
@@ -424,7 +504,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             <section className="directory-hero" aria-labelledby="directory-title">
               <div className="directory-hero-inner">
                 <div>
-                  <h1 id="directory-title">Find events in your community</h1>
+                  <h1 id="directory-title" ref={directoryHeadingRef} tabIndex={-1}>Find events in your community</h1>
                   <p>Browse organisations near you, then see everything they have coming up.</p>
                 </div>
                 <SearchField label="Search organisations or events" placeholder="Search organisations, places or events" value={organisationQuery} onChange={setOrganisationQuery} />
@@ -483,7 +563,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
       {selectedEvent ? (
         <dialog className="event-dialog" ref={dialogRef} aria-labelledby="dialog-title" onClose={() => setSelectedEvent(null)} onClick={(event) => { if (event.target === event.currentTarget) closeEvent() }}>
           <div className="dialog-panel">
-            <div className="dialog-header"><button className="icon-button" type="button" onClick={closeEvent} aria-label="Close event details"><Icon name="close" size={20} /></button></div>
+            <div className="dialog-header"><button className="dialog-reset-button" type="button" onClick={requestReset}>Reset demo</button><button className="icon-button" type="button" onClick={closeEvent} aria-label="Close event details"><Icon name="close" size={20} /></button></div>
             {bookingStage === 'event' ? (
               <div className="dialog-content">
                 <span className="type-label">{selectedEvent.category}</span>
@@ -529,6 +609,34 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           </div>
         </dialog>
       ) : null}
+
+      <dialog
+        className="reset-dialog"
+        ref={resetDialogRef}
+        aria-labelledby="reset-dialog-title"
+        aria-describedby="reset-dialog-description"
+        onClose={handleResetDialogClose}
+        onClick={(event) => { if (event.target === event.currentTarget) closeResetDialog() }}
+      >
+        <div className="reset-dialog-content">
+          <div>
+            <p className="reset-dialog-context">Synthetic demonstration</p>
+            <h2 id="reset-dialog-title">Reset the demo?</h2>
+          </div>
+          <p id="reset-dialog-description">All current demo changes will be discarded, including check-ins, accountability updates and activity history.</p>
+          <ul>
+            <li>Riverside returns to 16 registrations and 13 check-ins.</li>
+            <li>Active accountability sessions and prepared booking details are cleared.</li>
+            <li>The public organisation directory becomes the starting screen.</li>
+          </ul>
+          <p className="reset-demo-only">This is a demo-only action. It does not affect any production Attendly data.</p>
+          {resetError ? <div className="reset-dialog-error" role="alert">{resetError}</div> : null}
+          <div className="reset-dialog-actions">
+            <button className="button button-secondary" type="button" onClick={closeResetDialog} autoFocus>Cancel</button>
+            <button className="button button-reset-confirm" type="button" onClick={confirmReset}>Reset synthetic demo</button>
+          </div>
+        </div>
+      </dialog>
     </div>
   )
 }

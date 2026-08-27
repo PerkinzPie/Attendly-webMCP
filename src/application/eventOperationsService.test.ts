@@ -73,6 +73,7 @@ function createService(
       counters.set(kind, sequence)
       return `${kind}_${sequence}`
     },
+    resetState: createDemoEventOperationsState,
   })
 }
 
@@ -261,6 +262,52 @@ describe('event operations application service', () => {
       .toEqual(humanStore.read().state.checkIns.map(({ actor: _actor, ...checkIn }) => checkIn))
     expect(agentStore.read().state.activityEntries.map(({ actor: _actor, ...entry }) => entry))
       .toEqual(humanStore.read().state.activityEntries.map(({ actor: _actor, ...entry }) => entry))
+  })
+
+  it('atomically restores the deterministic seed and publishes the reset state', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const notifications: number[] = []
+    service.subscribe((snapshot) => notifications.push(snapshot.revision))
+
+    expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
+
+    const result = service.resetDemo({ actor: organiser })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        revision: 3,
+        checkedInCount: 13,
+        notArrivedCount: 3,
+        activeAccountability: null,
+      },
+    })
+    const persisted = store.read()
+    expect(persisted.state.checkIns).toHaveLength(13)
+    expect(persisted.state.activityEntries).toEqual([])
+    expect(persisted.state.accountabilitySession).toBeNull()
+    expect(notifications).toEqual([1, 2, 3])
+  })
+
+  it('does not report or publish a reset when persistence fails', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    let notifications = 0
+    service.subscribe(() => notifications += 1)
+    expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    const before = JSON.stringify(store.read())
+    notifications = 0
+    memory.failNextWrite()
+
+    const result = service.resetDemo({ actor: organiser })
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'persistence_failed' } })
+    expect(JSON.stringify(store.read())).toBe(before)
+    expect(notifications).toBe(0)
   })
 
   it('rejects an unauthorised caller before changing persisted state', () => {

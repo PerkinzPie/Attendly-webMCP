@@ -20,6 +20,7 @@ export type EventOperation =
   | 'check-in-attendee'
   | 'start-accountability'
   | 'record-accountability-status'
+  | 'reset-demo'
 
 export type EventOperationsServiceErrorCode =
   | 'not_authorised'
@@ -80,11 +81,16 @@ export type RecordAccountabilityStatusRequest = {
   readonly note?: string
 }
 
+export type ResetDemoRequest = {
+  readonly actor: OperationsActor
+}
+
 export type EventOperationsServiceOptions = {
   readonly store: EventOperationsStore
   readonly authorise: (actor: OperationsActor, operation: EventOperation) => boolean
   readonly now: () => string
   readonly createId: (kind: 'check-in' | 'activity' | 'accountability-session') => string
+  readonly resetState: () => EventOperationsState
 }
 
 export type EventOperationsService = {
@@ -94,6 +100,7 @@ export type EventOperationsService = {
   recordAccountabilityStatus(
     request: RecordAccountabilityStatusRequest,
   ): EventOperationsServiceResult<EventOperationsMutationResult>
+  resetDemo(request: ResetDemoRequest): EventOperationsServiceResult<EventOperationsServiceSnapshot>
   subscribe(listener: (snapshot: EventOperationsServiceSnapshot) => void): () => void
 }
 
@@ -294,6 +301,19 @@ export function createEventOperationsService(
         })
 
         return mutationResult(updated.persisted, updated.value)
+      } catch (error) {
+        return failure(error)
+      }
+    },
+    resetDemo(request) {
+      try {
+        requireAuthorised(options, request.actor, 'reset-demo')
+        const updated = options.store.update(() => ({
+          state: options.resetState(),
+          value: null,
+        }))
+
+        return { ok: true, data: toSnapshot(updated.persisted) }
       } catch (error) {
         return failure(error)
       }

@@ -13,23 +13,42 @@ const organiser: OperationsActor = {
   isSynthetic: true,
 }
 
-function createTestOperationsService(): EventOperationsService {
+function createTestOperationsHarness() {
   const values = new Map<string, string>()
   let sequence = 0
+  let failNextWrite = false
   const store = createPersistentEventOperationsStore({
     storage: {
       getItem: (key) => values.get(key) ?? null,
-      setItem: (key, value) => values.set(key, value),
+      setItem: (key, value) => {
+        if (failNextWrite) {
+          failNextWrite = false
+          throw new Error('Synthetic storage failure')
+        }
+        values.set(key, value)
+      },
     },
     initialState: createDemoEventOperationsState(),
   })
 
-  return createEventOperationsService({
+  const service = createEventOperationsService({
     store,
     authorise: () => true,
     now: () => '2026-09-05T18:30:00+01:00',
     createId: (kind) => `${kind}_${++sequence}`,
+    resetState: createDemoEventOperationsState,
   })
+
+  return {
+    service,
+    failNextWrite() {
+      failNextWrite = true
+    },
+  }
+}
+
+function createTestOperationsService(): EventOperationsService {
+  return createTestOperationsHarness().service
 }
 
 function openOrganisation(name: string) {
@@ -92,6 +111,74 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Riverside Community Workshop updated. 14 checked in, 2 not arrived.',
     )
+  })
+
+  it('does not reset persisted state before confirmation and supports cancellation', () => {
+    const service = createTestOperationsService()
+    expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    render(<App operationsService={service} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
+    const dialog = screen.getByRole('dialog', { name: 'Reset the demo?' })
+    expect(within(dialog).getByText(/all current demo changes will be discarded/i)).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog', { name: 'Reset the demo?' })).not.toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
+    expect(screen.queryByText(/demo reset complete/i)).not.toBeInTheDocument()
+  })
+
+  it('resets changed persisted and visible state from an open event', () => {
+    const service = createTestOperationsService()
+    expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
+    render(<App operationsService={service} />)
+    openOrganisation('Westbrook Primary School')
+    const eventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
+    fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'View event' }))
+    const eventDialog = screen.getByRole('dialog', { name: 'Westbrook Autumn Fair' })
+    fireEvent.click(within(eventDialog).getByRole('button', { name: 'Book free tickets' }))
+    fireEvent.change(within(eventDialog).getByLabelText('Your name'), { target: { value: 'Alex Morgan' } })
+    fireEvent.click(within(eventDialog).getByRole('button', { name: 'Reset demo' }))
+
+    const resetDialog = screen.getByRole('dialog', { name: 'Reset the demo?' })
+    fireEvent.click(within(resetDialog).getByRole('button', { name: 'Reset synthetic demo' }))
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Find events in your community' })).toBeInTheDocument()
+    expect(screen.getByText('Demo reset complete. The deterministic synthetic data is ready.', {
+      selector: '.reset-feedback',
+    })).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({
+      ok: true,
+      data: { checkedInCount: 13, notArrivedCount: 3, activeAccountability: null },
+    })
+
+    openOrganisation('Westbrook Primary School')
+    const resetEventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
+    fireEvent.click(within(resetEventRow as HTMLElement).getByRole('button', { name: 'View event' }))
+    const restoredEventDialog = screen.getByRole('dialog', { name: 'Westbrook Autumn Fair' })
+    fireEvent.click(within(restoredEventDialog).getByRole('button', { name: 'Book free tickets' }))
+    expect(within(restoredEventDialog).getByLabelText('Your name')).toHaveValue('')
+  })
+
+  it('shows a recoverable reset error without claiming success when persistence fails', () => {
+    const harness = createTestOperationsHarness()
+    expect(harness.service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
+    render(<App operationsService={harness.service} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Live operations' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
+    harness.failNextWrite()
+
+    const dialog = screen.getByRole('dialog', { name: 'Reset the demo?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset synthetic demo' }))
+
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'The event operation could not be saved. No changes were saved. Check browser storage and retry.',
+    )
+    expect(screen.queryByText(/demo reset complete/i)).not.toBeInTheDocument()
+    expect(harness.service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
   })
 
   it('searches organisation attributes and their event catalogue', () => {

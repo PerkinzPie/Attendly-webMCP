@@ -83,11 +83,17 @@
 
 .site-header nav [aria-current="page"] { color: var(--iris); font-weight: 650; }
 
+.header-utilities {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+
 .header-context {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-left: auto;
   color: var(--neutral-600);
   font-size: 0.78rem;
 }
@@ -99,6 +105,29 @@
   background: var(--success-strong);
 }
 
+.demo-reset-button,
+.dialog-reset-button {
+  border: 0;
+  color: var(--text-subtle);
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.demo-reset-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.demo-reset-button:hover,
+.dialog-reset-button:hover { color: var(--warning-strong); }
+
+.demo-reset-button:hover { border-color: var(--warning-strong); background: var(--warning-subtle); }
+
 .demo-banner {
   padding: 7px 20px;
   color: var(--neutral-700);
@@ -106,6 +135,20 @@
   font-size: 0.75rem;
   line-height: 1.4;
   text-align: center;
+}
+
+.reset-feedback {
+  width: min(1120px, calc(100% - 40px));
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 18px auto 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  color: var(--success-strong);
+  background: var(--success-subtle);
+  font-size: 0.84rem;
+  font-weight: 600;
 }
 
 .directory-hero,
@@ -139,6 +182,8 @@
   letter-spacing: -0.035em;
   line-height: 1.08;
 }
+
+.directory-hero h1:focus { outline: 3px solid var(--sky); outline-offset: 6px; }
 
 .directory-hero p {
   max-width: 590px;
@@ -664,6 +709,8 @@ footer { color: var(--neutral-0); background: var(--navy); }
 .button-primary:hover { background: var(--indigo); }
 .button-secondary { border-color: var(--border-strong); color: var(--ink); background: var(--surface); }
 .button-secondary:hover { background: var(--neutral-100); }
+.button-reset-confirm { color: var(--neutral-0); background: var(--warning-strong); }
+.button-reset-confirm:hover { background: color-mix(in oklch, var(--warning-strong) 86%, var(--ink)); }
 .button-wide { width: 100%; }
 
 .event-dialog {
@@ -681,7 +728,8 @@ footer { color: var(--neutral-0); background: var(--navy); }
 
 .event-dialog::backdrop { background: rgb(3 5 41 / 62%); }
 .dialog-panel { max-height: min(860px, calc(100svh - 32px)); overflow-y: auto; }
-.dialog-header { position: sticky; top: 0; z-index: 1; display: flex; justify-content: flex-end; padding: 14px 16px 0; background: var(--surface); }
+.dialog-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 0; background: var(--surface); }
+.dialog-reset-button { min-height: 40px; padding: 8px; }
 .icon-button { width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-md); color: var(--text-subtle); background: transparent; cursor: pointer; }
 .icon-button:hover { color: var(--ink); background: var(--neutral-100); }
 .dialog-content { display: flex; flex-direction: column; gap: 24px; padding: 6px 40px 40px; }
@@ -719,6 +767,36 @@ footer { color: var(--neutral-0); background: var(--navy); }
 .reference-box span { color: var(--text-subtle); font-size: 0.74rem; }
 .reference-box strong { margin-top: 4px; color: var(--ink); font-size: 1rem; letter-spacing: 0.03em; }
 
+.reset-dialog {
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100svh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: var(--radius-lg);
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 8px 24px -8px rgb(3 5 41 / 28%);
+}
+
+.reset-dialog::backdrop { background: rgb(3 5 41 / 62%); }
+
+.reset-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 32px;
+}
+
+.reset-dialog-context { margin: 0 0 7px; color: var(--iris); font-size: 0.78rem; font-weight: 650; }
+.reset-dialog h2 { margin: 0; color: var(--ink); font-family: var(--font-display); font-size: 1.7rem; font-weight: 620; letter-spacing: -0.02em; }
+.reset-dialog-content > p { margin: 0; color: var(--text-subtle); line-height: 1.6; }
+.reset-dialog-content ul { display: grid; gap: 8px; margin: 0; padding-left: 20px; color: var(--text-subtle); font-size: 0.84rem; line-height: 1.5; }
+.reset-dialog-content .reset-demo-only { padding: 12px 14px; border-radius: var(--radius-md); color: var(--neutral-700); background: var(--neutral-100); font-size: 0.8rem; }
+.reset-dialog-error { padding: 12px 14px; border-radius: var(--radius-md); color: var(--warning-strong); background: var(--warning-subtle); font-size: 0.84rem; line-height: 1.5; }
+.reset-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+
 .icon { flex: 0 0 auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
@@ -739,6 +817,7 @@ footer { color: var(--neutral-0); background: var(--navy); }
 @media (max-width: 680px) {
   .header-inner { min-height: 0; flex-wrap: wrap; gap: 12px 20px; padding-top: 13px; padding-bottom: 12px; }
   .attendly-brand { flex: 1 1 auto; }
+  .header-utilities { flex: 0 0 auto; }
   .site-header nav { order: 3; width: 100%; gap: 22px; }
   .site-header nav button { min-height: 32px; }
   .header-context { flex: 0 0 auto; font-size: 0.72rem; }
@@ -784,6 +863,7 @@ footer { color: var(--neutral-0); background: var(--navy); }
   .attendly-brand img { width: 104px; }
   .attendly-brand > span { padding-left: 9px; font-size: 0.7rem; }
   .header-context { display: none; }
+  .reset-feedback { width: calc(100% - 28px); }
   .directory-hero h1 { font-size: 2.25rem; }
   .directory-section,
   .events-section { padding: 56px 0 72px; }
@@ -807,6 +887,10 @@ footer { color: var(--neutral-0); background: var(--navy); }
   .workspace-buttons .button { width: 100%; }
   .workspace-strip { grid-template-columns: 1fr; }
   .workspace-strip p { grid-column: auto; }
+  .reset-dialog { width: calc(100% - 20px); max-height: calc(100svh - 20px); }
+  .reset-dialog-content { padding: 24px 20px; }
+  .reset-dialog-actions { flex-direction: column-reverse; }
+  .reset-dialog-actions .button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
