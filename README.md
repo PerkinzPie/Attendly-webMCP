@@ -77,6 +77,10 @@ src/
 └── main.tsx     Browser entry point
 ```
 
+The concise [shared UI and WebMCP boundaries](docs/adr/0001-shared-webmcp-boundaries.md)
+record the durable constraints for subsequent stories while leaving datastore,
+hosting and protocol choices to their implementation work.
+
 The Attendly wordmark, icon and typefaces in `public/` are authorised brand
 assets. No existing Attendly application source code is included.
 
