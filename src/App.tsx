@@ -5,7 +5,7 @@ import type {
   EventOperationsService,
   EventOperationsServiceSnapshot,
 } from './application/eventOperationsService'
-import type { AttendeeSearchResult } from './domain/eventOperations'
+import type { AttendeeSearchResult, CreatedEvent, EventDraft } from './domain/eventOperations'
 import {
   demoEvents,
   demoOrganisations,
@@ -17,7 +17,7 @@ import {
   type OrganisationType,
 } from './demo/seed'
 
-type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' | 'search' | 'ticket'
+type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
 type OrganisationFilter = 'All organisations' | OrganisationType
 type EventFilter = 'All events' | EventCategory
@@ -25,7 +25,7 @@ type AppSurface = 'directory' | 'operations'
 
 const demoUiActor = {
   id: 'actor_demo_demonstrator',
-  displayName: 'Dashboard user',
+  displayName: 'Event manager',
   channel: 'human-ui',
   isSynthetic: true,
 } as const
@@ -38,6 +38,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     location: <><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></>,
+    refresh: <><path d="M20 11a8 8 0 1 0-2.34 5.66" /><path d="M20 5v6h-6" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
     ticket: <path d="M4 6h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4V7a1 1 0 0 1 1-1Z" />,
   }
@@ -129,6 +130,204 @@ function EventRow({ event, onSelect }: { event: DemoEvent; onSelect: (event: Dem
   )
 }
 
+function formatEventDate(startsAt: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(startsAt))
+}
+
+function EventCreationWorkspace({
+  createdEvents,
+  onPrepareDraft,
+  onConfirmDraft,
+  onClose,
+}: {
+  createdEvents: readonly CreatedEvent[]
+  onPrepareDraft: EventOperationsService['prepareEventDraft']
+  onConfirmDraft: EventOperationsService['confirmEventDraft']
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [startsAt, setStartsAt] = useState('')
+  const [venue, setVenue] = useState('')
+  const [capacity, setCapacity] = useState('')
+  const [draft, setDraft] = useState<EventDraft | null>(null)
+  const [openedEventId, setOpenedEventId] = useState<string | null>(null)
+  const [createdEventId, setCreatedEventId] = useState<string | null>(null)
+  const [serviceError, setServiceError] = useState<string | null>(null)
+  const openedEvent = createdEvents.find((event) => event.id === openedEventId) ?? null
+
+  const updateField = (update: () => void) => {
+    update()
+    setDraft(null)
+    setServiceError(null)
+  }
+
+  const prepareDraft = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const result = onPrepareDraft({
+      name,
+      startsAt,
+      venue,
+      capacity: Number(capacity),
+    })
+
+    if (!result.ok) {
+      setServiceError(`${result.error.message} ${result.error.remediation}`)
+      return
+    }
+
+    setDraft(result.data)
+    setServiceError(null)
+  }
+
+  const cancelDraft = () => {
+    setDraft(null)
+    setName('')
+    setStartsAt('')
+    setVenue('')
+    setCapacity('')
+    setServiceError(null)
+    onClose()
+  }
+
+  const confirmDraft = () => {
+    if (!draft || draft.errors.length > 0) return
+    const result = onConfirmDraft({ draft, actor: demoUiActor })
+    if (!result.ok) {
+      setServiceError(`${result.error.message} ${result.error.remediation}`)
+      return
+    }
+
+    setCreatedEventId(result.data.event.id)
+    setOpenedEventId(result.data.event.id)
+    setDraft(null)
+    setName('')
+    setStartsAt('')
+    setVenue('')
+    setCapacity('')
+    setServiceError(null)
+  }
+
+  const fieldError = (field: EventDraft['errors'][number]['field']) =>
+    draft?.errors.find((issue) => issue.field === field)?.message
+
+  return (
+    <section className="event-creation" id="event-creation" aria-labelledby="event-creation-title">
+      <div className="event-creation-heading">
+        <h2 id="event-creation-title">Create event</h2>
+        <button className="text-action" type="button" onClick={cancelDraft}>Close</button>
+      </div>
+
+      {serviceError ? <p className="event-creation-error" role="alert">{serviceError}</p> : null}
+
+      {draft && draft.errors.length === 0 ? (
+        <div className="event-draft-review">
+          <h3>Review event</h3>
+          <dl>
+            <div><dt>Name</dt><dd>{draft.name}</dd></div>
+            <div><dt>Date and time</dt><dd>{formatEventDate(draft.startsAt)}</dd></div>
+            <div><dt>Venue</dt><dd>{draft.venue}</dd></div>
+            <div><dt>Capacity</dt><dd>{draft.capacity}</dd></div>
+          </dl>
+          {draft.warnings.map((warning) => (
+            <p className="event-draft-warning" key={`${warning.field}-${warning.message}`}>{warning.message}</p>
+          ))}
+          <div className="event-creation-buttons">
+            <button className="button button-primary" type="button" onClick={confirmDraft}>Confirm event</button>
+            <button className="button button-secondary" type="button" onClick={cancelDraft}>Cancel draft</button>
+          </div>
+        </div>
+      ) : !createdEventId ? (
+        <form className="event-creation-form" noValidate onSubmit={prepareDraft}>
+          <div className="event-form-field">
+            <label htmlFor="event-name">Event name</label>
+            <input
+              id="event-name"
+              aria-invalid={Boolean(fieldError('name'))}
+              aria-describedby={fieldError('name') ? 'event-name-error' : undefined}
+              value={name}
+              onChange={(event) => updateField(() => setName(event.target.value))}
+            />
+            {fieldError('name') ? <span className="field-error" id="event-name-error">{fieldError('name')}</span> : null}
+          </div>
+          <div className="event-form-field">
+            <label htmlFor="event-start">Date and time</label>
+            <input
+              id="event-start"
+              type="datetime-local"
+              aria-invalid={Boolean(fieldError('startsAt'))}
+              aria-describedby={fieldError('startsAt') ? 'event-start-error' : undefined}
+              value={startsAt}
+              onChange={(event) => updateField(() => setStartsAt(event.target.value))}
+            />
+            {fieldError('startsAt') ? <span className="field-error" id="event-start-error">{fieldError('startsAt')}</span> : null}
+          </div>
+          <div className="event-form-field">
+            <label htmlFor="event-venue">Venue</label>
+            <input
+              id="event-venue"
+              aria-invalid={Boolean(fieldError('venue'))}
+              aria-describedby={fieldError('venue') ? 'event-venue-error' : undefined}
+              value={venue}
+              onChange={(event) => updateField(() => setVenue(event.target.value))}
+            />
+            {fieldError('venue') ? <span className="field-error" id="event-venue-error">{fieldError('venue')}</span> : null}
+          </div>
+          <div className="event-form-field">
+            <label htmlFor="event-capacity">Capacity</label>
+            <input
+              id="event-capacity"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              aria-invalid={Boolean(fieldError('capacity'))}
+              aria-describedby={fieldError('capacity') ? 'event-capacity-error' : undefined}
+              value={capacity}
+              onChange={(event) => updateField(() => setCapacity(event.target.value))}
+            />
+            {fieldError('capacity') ? <span className="field-error" id="event-capacity-error">{fieldError('capacity')}</span> : null}
+          </div>
+          <button className="button button-primary" type="submit">Review event</button>
+        </form>
+      ) : null}
+
+      {createdEventId ? (
+        <p className="event-created" role="status">Event created.</p>
+      ) : null}
+
+      {createdEvents.length > 0 ? (
+        <div className="created-events">
+          <h3>Created events</h3>
+          <ul>
+            {createdEvents.map((event) => (
+              <li key={event.id}>
+                <span>{event.name}</span>
+                <button className="text-action" type="button" onClick={() => setOpenedEventId(event.id)}>Open</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {openedEvent ? (
+        <article className="created-event-detail" aria-label={openedEvent.name}>
+          <div>
+            <h3>{openedEvent.name}</h3>
+            <button className="text-action" type="button" onClick={() => setOpenedEventId(null)}>Close event</button>
+          </div>
+          <dl>
+            <div><dt>Date and time</dt><dd>{formatEventDate(openedEvent.startsAt)}</dd></div>
+            <div><dt>Venue</dt><dd>{openedEvent.venue}</dd></div>
+            <div><dt>Capacity</dt><dd>{openedEvent.capacity}</dd></div>
+          </dl>
+        </article>
+      ) : null}
+    </section>
+  )
+}
+
 function OperationsWorkspace({
   snapshot,
   error,
@@ -136,6 +335,8 @@ function OperationsWorkspace({
   onRefresh,
   onBrowseEvents,
   onSearchAttendees,
+  onPrepareEventDraft,
+  onConfirmEventDraft,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
   error: string | null
@@ -143,9 +344,12 @@ function OperationsWorkspace({
   onRefresh: () => void
   onBrowseEvents: () => void
   onSearchAttendees: EventOperationsService['searchAttendees']
+  onPrepareEventDraft: EventOperationsService['prepareEventDraft']
+  onConfirmEventDraft: EventOperationsService['confirmEventDraft']
 }) {
   const [attendeeQuery, setAttendeeQuery] = useState('')
   const [expandedAttendeeId, setExpandedAttendeeId] = useState<string | null>(null)
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false)
   const accountabilityLabel = snapshot?.activeAccountability
     ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
     : 'Not started'
@@ -160,7 +364,7 @@ function OperationsWorkspace({
       <div className="section-inner">
         <div className="workspace-heading">
           <div>
-            <p className="workspace-context">Dashboard</p>
+            <p className="workspace-context">Event management</p>
             <h1 id="operations-title" ref={headingRef} tabIndex={-1}>Riverside Community Workshop</h1>
           </div>
         </div>
@@ -272,11 +476,29 @@ function OperationsWorkspace({
                   <h2 id="workspace-actions-title">Actions</h2>
                 </div>
                 <div className="workspace-buttons">
-                  <button className="button button-primary" type="button" onClick={onRefresh}>Refresh live state</button>
+                  <button className="button button-primary" type="button" aria-expanded={isCreatingEvent} aria-controls="event-creation" onClick={() => setIsCreatingEvent((current) => !current)}>Create event</button>
+                  <button
+                    className="button button-secondary button-icon"
+                    type="button"
+                    aria-label="Refresh live data"
+                    title="Refresh live data"
+                    onClick={onRefresh}
+                  >
+                    <Icon name="refresh" />
+                  </button>
                   <button className="button button-secondary" type="button" onClick={onBrowseEvents}>Browse public events</button>
                 </div>
               </section>
             </div>
+
+            {isCreatingEvent ? (
+              <EventCreationWorkspace
+                createdEvents={snapshot.createdEvents}
+                onPrepareDraft={onPrepareEventDraft}
+                onConfirmDraft={onConfirmEventDraft}
+                onClose={() => setIsCreatingEvent(false)}
+              />
+            ) : null}
 
             <div className="workspace-strip" aria-label="Current workspace context">
               <div><span>Accountability</span><strong>{accountabilityLabel}</strong></div>
@@ -474,7 +696,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           </button>
           <nav aria-label="Main navigation">
             <button type="button" aria-current={surface === 'directory' ? 'page' : undefined} onClick={showDirectory}>Public events</button>
-            <button type="button" aria-current={surface === 'operations' ? 'page' : undefined} onClick={showOperations}>Dashboard</button>
+            <button type="button" aria-current={surface === 'operations' ? 'page' : undefined} onClick={showOperations}>Events</button>
           </nav>
           <button className="demo-reset-button" type="button" onClick={requestReset}>Reset demo</button>
         </div>
@@ -491,6 +713,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             onRefresh={refreshOperations}
             onBrowseEvents={showDirectory}
             onSearchAttendees={service.searchAttendees}
+            onPrepareEventDraft={service.prepareEventDraft}
+            onConfirmEventDraft={service.confirmEventDraft}
           />
         ) : selectedOrganisation ? (
           <>

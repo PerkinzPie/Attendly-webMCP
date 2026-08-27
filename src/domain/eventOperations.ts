@@ -46,12 +46,47 @@ export type CapacityRule = {
 export type ActivityEntry = {
   readonly id: string
   readonly eventId: string
-  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded'
+  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded' | 'event-created'
   readonly targetId: string
   readonly actor: OperationsActor
   readonly occurredAt: string
   readonly note?: string
   readonly isSynthetic: true
+}
+
+export type CreatedEvent = {
+  readonly id: string
+  readonly sourceDraftId: string
+  readonly name: string
+  readonly startsAt: string
+  readonly venue: string
+  readonly capacity: number
+  readonly createdAt: string
+  readonly createdBy: OperationsActor
+  readonly isSynthetic: true
+}
+
+export type EventDraftIssue = {
+  readonly field: 'name' | 'startsAt' | 'venue' | 'capacity'
+  readonly message: string
+}
+
+export type EventDraft = {
+  readonly id: string
+  readonly name: string
+  readonly startsAt: string
+  readonly venue: string
+  readonly capacity: number
+  readonly preparedAt: string
+  readonly errors: readonly EventDraftIssue[]
+  readonly warnings: readonly EventDraftIssue[]
+}
+
+export type EventDraftInput = {
+  readonly name: string
+  readonly startsAt: string
+  readonly venue: string
+  readonly capacity: number
 }
 
 export type AccountabilityStatus = 'unconfirmed' | 'accounted-for' | 'exempt-not-present'
@@ -76,6 +111,7 @@ export type AccountabilitySession = {
 
 export type EventOperationsState = {
   readonly event: EventRecord
+  readonly createdEvents: readonly CreatedEvent[]
   readonly registrationGroups: readonly RegistrationGroup[]
   readonly attendees: readonly Attendee[]
   readonly checkIns: readonly CheckIn[]
@@ -129,15 +165,22 @@ export type OperationsTransition = {
   readonly activityEntry: ActivityEntry
 }
 
+export type EventCreationTransition = {
+  readonly state: EventOperationsState
+  readonly event: CreatedEvent
+  readonly activityEntry: ActivityEntry
+}
+
 export type CheckInTransition = {
   readonly state: EventOperationsState
   readonly eventSnapshot: EventSnapshot
   readonly activityEntry: ActivityEntry
 }
 
-type EventOperationsStateInput = Omit<EventOperationsState, 'activityEntries' | 'accountabilitySession'> & {
+type EventOperationsStateInput = Omit<EventOperationsState, 'activityEntries' | 'accountabilitySession' | 'createdEvents'> & {
   readonly activityEntries?: readonly ActivityEntry[]
   readonly accountabilitySession?: AccountabilitySession | null
+  readonly createdEvents?: readonly CreatedEvent[]
 }
 
 export type CheckInAttendeeCommand = {
@@ -165,6 +208,18 @@ export type RecordAccountabilityCommand = {
   readonly note?: string
 }
 
+export type PrepareEventDraftCommand = {
+  readonly draftId: string
+  readonly preparedAt: string
+}
+
+export type ConfirmEventDraftCommand = {
+  readonly eventId: string
+  readonly activityId: string
+  readonly createdAt: string
+  readonly actor: OperationsActor
+}
+
 function invariant(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
@@ -185,6 +240,7 @@ function validateState(state: EventOperationsState) {
   assertUniqueIds('Attendee', state.attendees)
   assertUniqueIds('Check-in', state.checkIns)
   assertUniqueIds('Activity entry', state.activityEntries)
+  assertUniqueIds('Created event', state.createdEvents)
 
   const groupsById = new Map(state.registrationGroups.map((group) => [group.id, group]))
   const attendeesById = new Map(state.attendees.map((attendee) => [attendee.id, attendee]))
@@ -214,8 +270,19 @@ function validateState(state: EventOperationsState) {
     checkedInAttendeeIds.add(checkIn.attendeeId)
   }
 
+  const eventIds = new Set([state.event.id, ...state.createdEvents.map((event) => event.id)])
+  const sourceDraftIds = new Set<string>()
+  for (const event of state.createdEvents) {
+    invariant(event.name.length > 0, `Created event ${event.id} must have a name`)
+    invariant(event.venue.length > 0, `Created event ${event.id} must have a venue`)
+    invariant(!Number.isNaN(Date.parse(event.startsAt)), `Created event ${event.id} must have a valid start time`)
+    invariant(event.capacity > 0, `Created event ${event.id} must have a positive capacity`)
+    invariant(!sourceDraftIds.has(event.sourceDraftId), `Draft ${event.sourceDraftId} created more than one event`)
+    sourceDraftIds.add(event.sourceDraftId)
+  }
+
   for (const entry of state.activityEntries) {
-    invariant(entry.eventId === state.event.id, `Activity entry ${entry.id} belongs to another event`)
+    invariant(eventIds.has(entry.eventId), `Activity entry ${entry.id} belongs to another event`)
   }
 
   const session = state.accountabilitySession
@@ -231,6 +298,10 @@ function validateState(state: EventOperationsState) {
 export function createEventOperationsState(input: EventOperationsStateInput): EventOperationsState {
   const state: EventOperationsState = {
     event: { ...input.event },
+    createdEvents: (input.createdEvents ?? []).map((event) => ({
+      ...event,
+      createdBy: cloneActor(event.createdBy),
+    })),
     registrationGroups: input.registrationGroups.map((group) => ({
       ...group,
       attendeeIds: [...group.attendeeIds],
@@ -295,6 +366,82 @@ export function getAccountabilitySnapshot(state: EventOperationsState): Accounta
     unconfirmed: session.records.filter((record) => record.status === 'unconfirmed').length,
     exemptNotPresent: session.records.filter((record) => record.status === 'exempt-not-present').length,
   }
+}
+
+function normaliseText(value: string) {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+export function prepareEventDraft(
+  input: EventDraftInput,
+  command: PrepareEventDraftCommand,
+): EventDraft {
+  const name = normaliseText(input.name)
+  const venue = normaliseText(input.venue)
+  const parsedStartsAt = new Date(input.startsAt)
+  const startsAt = Number.isNaN(parsedStartsAt.getTime()) ? '' : parsedStartsAt.toISOString()
+  const errors: EventDraftIssue[] = []
+  const warnings: EventDraftIssue[] = []
+
+  if (!name) errors.push({ field: 'name', message: 'Enter an event name.' })
+  if (!startsAt) errors.push({ field: 'startsAt', message: 'Enter a valid date and time.' })
+  if (!venue) errors.push({ field: 'venue', message: 'Enter a venue.' })
+  if (!Number.isInteger(input.capacity) || input.capacity < 1) {
+    errors.push({ field: 'capacity', message: 'Capacity must be a whole number of at least 1.' })
+  } else if (input.capacity < 10) {
+    warnings.push({ field: 'capacity', message: 'Capacity is low; check it before creating the event.' })
+  }
+
+  return {
+    id: command.draftId,
+    name,
+    startsAt,
+    venue,
+    capacity: input.capacity,
+    preparedAt: command.preparedAt,
+    errors,
+    warnings,
+  }
+}
+
+export function confirmEventDraft(
+  state: EventOperationsState,
+  draft: EventDraft,
+  command: ConfirmEventDraftCommand,
+): EventCreationTransition {
+  invariant(draft.errors.length === 0, 'Event draft contains validation errors')
+  invariant(
+    !state.createdEvents.some((event) => event.sourceDraftId === draft.id),
+    'Event draft has already been confirmed',
+  )
+
+  const event: CreatedEvent = {
+    id: command.eventId,
+    sourceDraftId: draft.id,
+    name: draft.name,
+    startsAt: draft.startsAt,
+    venue: draft.venue,
+    capacity: draft.capacity,
+    createdAt: command.createdAt,
+    createdBy: cloneActor(command.actor),
+    isSynthetic: true,
+  }
+  const activityEntry: ActivityEntry = {
+    id: command.activityId,
+    eventId: event.id,
+    action: 'event-created',
+    targetId: event.id,
+    actor: cloneActor(command.actor),
+    occurredAt: command.createdAt,
+    isSynthetic: true,
+  }
+  const nextState = createEventOperationsState({
+    ...state,
+    createdEvents: [...state.createdEvents, event],
+    activityEntries: [...state.activityEntries, activityEntry],
+  })
+
+  return { state: nextState, event, activityEntry }
 }
 
 export function searchAttendees(

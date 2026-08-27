@@ -100,6 +100,7 @@ describe('event operations application service', () => {
       overCapacityBy: 0,
       capacityStatus: 'near-capacity',
       activeAccountability: null,
+      createdEvents: [],
     })
     expect(JSON.parse(JSON.stringify(result.data))).toEqual(result.data)
   })
@@ -119,6 +120,78 @@ describe('event operations application service', () => {
     expect(result.data.map((attendee) => attendee.name)).toEqual(['Sarah Jenkins', 'Leo Jenkins'])
     expect(JSON.stringify(store.read())).toBe(before)
     expect(notifications).toBe(0)
+  })
+
+  it('prepares, validates and confirms an event through one persisted transition', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const before = JSON.stringify(store.read())
+    const notifications: number[] = []
+    service.subscribe((snapshot) => notifications.push(snapshot.revision))
+
+    const draftResult = service.prepareEventDraft({
+      name: '  Family   Games Night ',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: '  Main Hall ',
+      capacity: 8,
+    })
+
+    expect(draftResult.ok).toBe(true)
+    if (!draftResult.ok) throw new Error('Expected event draft to succeed')
+    expect(draftResult.data).toMatchObject({
+      name: 'Family Games Night',
+      venue: 'Main Hall',
+      errors: [],
+      warnings: [{ field: 'capacity' }],
+    })
+    expect(JSON.stringify(store.read())).toBe(before)
+    expect(notifications).toEqual([])
+
+    const confirmed = service.confirmEventDraft({ draft: draftResult.data, actor: organiser })
+
+    expect(confirmed.ok).toBe(true)
+    if (!confirmed.ok) throw new Error('Expected event creation to succeed')
+    expect(confirmed.data.snapshot).toMatchObject({ revision: 1 })
+    expect(confirmed.data.snapshot.createdEvents).toHaveLength(1)
+    expect(confirmed.data.event).toMatchObject({
+      name: 'Family Games Night',
+      venue: 'Main Hall',
+      capacity: 8,
+      createdBy: organiser,
+    })
+    expect(confirmed.data.activityEntry).toMatchObject({
+      action: 'event-created',
+      targetId: confirmed.data.event.id,
+      actor: organiser,
+    })
+    expect(store.read().state.createdEvents).toEqual([confirmed.data.event])
+    expect(notifications).toEqual([1])
+
+    expect(service.confirmEventDraft({ draft: draftResult.data, actor: organiser }))
+      .toMatchObject({ ok: false, error: { code: 'event_draft_already_confirmed' } })
+    expect(store.read().state.createdEvents).toHaveLength(1)
+  })
+
+  it('keeps invalid and cancelled event drafts out of persisted state', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const invalidDraft = service.prepareEventDraft({
+      name: 'Community Supper',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Riverside Hall',
+      capacity: 0,
+    })
+
+    expect(invalidDraft.ok).toBe(true)
+    if (!invalidDraft.ok) throw new Error('Expected event draft validation result')
+    expect(invalidDraft.data.errors).toEqual([
+      { field: 'capacity', message: 'Capacity must be a whole number of at least 1.' },
+    ])
+    expect(service.confirmEventDraft({ draft: invalidDraft.data, actor: organiser }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_event_draft' } })
+    expect(store.read().state.createdEvents).toEqual([])
   })
 
   it('commits a check-in and its activity together before notifying subscribers', () => {
@@ -288,6 +361,16 @@ describe('event operations application service', () => {
     const notifications: number[] = []
     service.subscribe((snapshot) => notifications.push(snapshot.revision))
 
+    const draft = service.prepareEventDraft({
+      name: 'Community Supper',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Riverside Hall',
+      capacity: 40,
+    })
+    expect(draft.ok).toBe(true)
+    if (!draft.ok) throw new Error('Expected event draft to succeed')
+    expect(service.confirmEventDraft({ draft: draft.data, actor: organiser }).ok).toBe(true)
+
     expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
     expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
 
@@ -296,7 +379,7 @@ describe('event operations application service', () => {
     expect(result).toMatchObject({
       ok: true,
       data: {
-        revision: 3,
+        revision: 4,
         checkedInCount: 13,
         notArrivedCount: 3,
         activeAccountability: null,
@@ -305,8 +388,9 @@ describe('event operations application service', () => {
     const persisted = store.read()
     expect(persisted.state.checkIns).toHaveLength(13)
     expect(persisted.state.activityEntries).toEqual([])
+    expect(persisted.state.createdEvents).toEqual([])
     expect(persisted.state.accountabilitySession).toBeNull()
-    expect(notifications).toEqual([1, 2, 3])
+    expect(notifications).toEqual([1, 2, 3, 4])
   })
 
   it('does not report or publish a reset when persistence fails', () => {

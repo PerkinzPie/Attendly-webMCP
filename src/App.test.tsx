@@ -75,31 +75,34 @@ describe('Attendly organisation directory', () => {
     expect(screen.queryByText(/fictional and use synthetic data/i)).not.toBeInTheDocument()
   })
 
-  it('opens the dashboard directly', () => {
+  it('opens event management directly', () => {
     render(<App />)
 
     expect(screen.getByText('Attendly-webMCP')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Attendly-webMCP home' })).toBeInTheDocument()
 
     const publicEvents = screen.getByRole('button', { name: 'Public events' })
-    const dashboard = screen.getByRole('button', { name: 'Dashboard' })
+    const events = screen.getByRole('button', { name: 'Events' })
     expect(publicEvents).toHaveAttribute('aria-current', 'page')
-    dashboard.focus()
-    expect(dashboard).toHaveFocus()
-    fireEvent.click(dashboard)
+    events.focus()
+    expect(events).toHaveFocus()
+    fireEvent.click(events)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Riverside Community Workshop' })).toHaveFocus()
-    expect(dashboard).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('Event management')).toBeInTheDocument()
+    expect(events).toHaveAttribute('aria-current', 'page')
     const totals = screen.getByLabelText('Current event totals')
     expect(within(totals).getByText('Registered').nextElementSibling).toHaveTextContent('16')
     expect(within(totals).getByText('Checked in').nextElementSibling).toHaveTextContent('13')
-    expect(screen.getByRole('button', { name: 'Refresh live state' })).toBeInTheDocument()
+    const refresh = screen.getByRole('button', { name: 'Refresh live data' })
+    expect(refresh).toHaveTextContent('')
+    expect(refresh.querySelector('svg')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Browse public events' })).toBeInTheDocument()
   })
 
   it('finds attendees and expands their grouped registration', () => {
     render(<App operationsService={createTestOperationsService()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
     const search = screen.getByPlaceholderText('Search attendees')
 
     fireEvent.change(search, { target: { value: 'Sarah Jenkins' } })
@@ -126,10 +129,75 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('No attendees found.')).toBeInTheDocument()
   })
 
+  it('validates and cancels an event draft without persisting it', () => {
+    const service = createTestOperationsService()
+    render(<App operationsService={service} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create event' }))
+
+    fireEvent.change(screen.getByLabelText('Event name'), { target: { value: 'Community Supper' } })
+    fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-10-10T18:30' } })
+    fireEvent.change(screen.getByLabelText('Venue'), { target: { value: 'Riverside Hall' } })
+    fireEvent.change(screen.getByLabelText('Capacity'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review event' }))
+
+    expect(screen.getByText('Capacity must be a whole number of at least 1.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm event' })).not.toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Capacity/ }), { target: { value: '8' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review event' }))
+    expect(screen.getByRole('heading', { name: 'Review event' })).toBeInTheDocument()
+    expect(screen.getByText('Capacity is low; check it before creating the event.')).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel draft' }))
+
+    expect(screen.queryByRole('heading', { name: 'Create event' })).not.toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
+  })
+
+  it('confirms exactly one reviewed event and opens its persisted details', () => {
+    const service = createTestOperationsService()
+    render(<App operationsService={service} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create event' }))
+
+    fireEvent.change(screen.getByLabelText('Event name'), { target: { value: '  Family   Games Night ' } })
+    fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-10-10T18:30' } })
+    fireEvent.change(screen.getByLabelText('Venue'), { target: { value: '  Main   Hall ' } })
+    fireEvent.change(screen.getByLabelText('Capacity'), { target: { value: '40' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review event' }))
+
+    const review = screen.getByRole('heading', { name: 'Review event' }).closest('div')
+    expect(review).not.toBeNull()
+    expect(within(review as HTMLElement).getByText('Family Games Night')).toBeInTheDocument()
+    expect(within(review as HTMLElement).getByText('Main Hall')).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { revision: 0, createdEvents: [] } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm event' }))
+
+    expect(screen.getByText('Event created.')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Family Games Night' })).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({
+      ok: true,
+      data: {
+        revision: 1,
+        createdEvents: [{ name: 'Family Games Night', venue: 'Main Hall', capacity: 40 }],
+      },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close event' }))
+    expect(screen.queryByRole('article', { name: 'Family Games Night' })).not.toBeInTheDocument()
+    const createdEvents = screen.getByRole('heading', { name: 'Created events' }).closest('div')
+    fireEvent.click(within(createdEvents as HTMLElement).getByRole('button', { name: 'Open' }))
+    expect(screen.getByRole('article', { name: 'Family Games Night' })).toBeInTheDocument()
+  })
+
   it('updates live totals and announces shared service changes without a page refresh', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
 
     act(() => {
       const result = service.checkInAttendee({
@@ -193,7 +261,7 @@ describe('Attendly organisation directory', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
     render(<App operationsService={harness.service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
     harness.failNextWrite()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))

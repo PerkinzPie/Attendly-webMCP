@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoEventOperationsState } from '../demo/seed'
 import {
+  confirmEventDraft,
   createEventOperationsState,
   getAccountabilitySnapshot,
   getEventSnapshot,
   recordAccountabilityStatus,
+  prepareEventDraft,
   searchAttendees,
   startAccountabilitySession,
   type OperationsActor,
@@ -103,6 +105,95 @@ describe('event operations domain', () => {
     expect(prefixResults[0].name).toBe('Sarah Jenkins')
     expect(prefixResults.map((result) => result.name)).toEqual(['Sarah Jenkins', 'Isaac Turner'])
     expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('normalises a reviewable event draft without changing persisted state', () => {
+    const state = createDemoEventOperationsState()
+    const before = JSON.stringify(state)
+
+    const draft = prepareEventDraft({
+      name: '  Family   Games Night ',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: '  Main   Hall ',
+      capacity: 8,
+    }, {
+      draftId: 'draft_family_games',
+      preparedAt: '2026-09-01T10:00:00.000Z',
+    })
+
+    expect(draft).toMatchObject({
+      id: 'draft_family_games',
+      name: 'Family Games Night',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Main Hall',
+      capacity: 8,
+      errors: [],
+      warnings: [{ field: 'capacity', message: 'Capacity is low; check it before creating the event.' }],
+    })
+    expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('prevents an invalid event draft from being confirmed', () => {
+    const state = createDemoEventOperationsState()
+    const draft = prepareEventDraft({
+      name: 'Community Supper',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Riverside Hall',
+      capacity: 0,
+    }, {
+      draftId: 'draft_invalid_capacity',
+      preparedAt: '2026-09-01T10:00:00.000Z',
+    })
+
+    expect(draft.errors).toEqual([
+      { field: 'capacity', message: 'Capacity must be a whole number of at least 1.' },
+    ])
+    expect(() => confirmEventDraft(state, draft, {
+      eventId: 'evt_community_supper',
+      activityId: 'act_community_supper_created',
+      createdAt: '2026-09-01T10:05:00.000Z',
+      actor: organiser,
+    })).toThrow('Event draft contains validation errors')
+  })
+
+  it('confirms one event and records its creation activity', () => {
+    const state = createDemoEventOperationsState()
+    const draft = prepareEventDraft({
+      name: 'Community Supper',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Riverside Hall',
+      capacity: 40,
+    }, {
+      draftId: 'draft_community_supper',
+      preparedAt: '2026-09-01T10:00:00.000Z',
+    })
+    const transition = confirmEventDraft(state, draft, {
+      eventId: 'evt_community_supper',
+      activityId: 'act_community_supper_created',
+      createdAt: '2026-09-01T10:05:00.000Z',
+      actor: organiser,
+    })
+
+    expect(state.createdEvents).toEqual([])
+    expect(transition.state.createdEvents).toEqual([transition.event])
+    expect(transition.event).toMatchObject({
+      id: 'evt_community_supper',
+      sourceDraftId: 'draft_community_supper',
+      name: 'Community Supper',
+      createdBy: organiser,
+    })
+    expect(transition.activityEntry).toMatchObject({
+      action: 'event-created',
+      eventId: 'evt_community_supper',
+      targetId: 'evt_community_supper',
+      actor: organiser,
+    })
+    expect(() => confirmEventDraft(transition.state, draft, {
+      eventId: 'evt_duplicate',
+      activityId: 'act_duplicate',
+      createdAt: '2026-09-01T10:06:00.000Z',
+      actor: organiser,
+    })).toThrow('Event draft has already been confirmed')
   })
 
   it('starts accountability with only checked-in attendees marked unconfirmed', () => {

@@ -1,7 +1,9 @@
 import {
   checkInAttendee as applyCheckIn,
+  confirmEventDraft as applyEventCreation,
   getAccountabilitySnapshot,
   getEventSnapshot,
+  prepareEventDraft as buildEventDraft,
   searchAttendees as findAttendees,
   recordAccountabilityStatus as applyAccountabilityStatus,
   startAccountabilitySession as applyAccountabilityStart,
@@ -9,6 +11,9 @@ import {
   type AccountabilityStatus,
   type ActivityEntry,
   type AttendeeSearchResult,
+  type CreatedEvent,
+  type EventDraft,
+  type EventDraftInput,
   type EventOperationsState,
   type OperationsActor,
 } from '../domain/eventOperations'
@@ -19,6 +24,7 @@ import {
 } from './eventOperationsStore'
 
 export type EventOperation =
+  | 'create-event'
   | 'check-in-attendee'
   | 'start-accountability'
   | 'record-accountability-status'
@@ -33,6 +39,8 @@ export type EventOperationsServiceErrorCode =
   | 'attendee_not_in_accountability'
   | 'invalid_command'
   | 'invalid_state'
+  | 'invalid_event_draft'
+  | 'event_draft_already_confirmed'
   | 'persistence_failed'
 
 export type EventOperationsServiceError = {
@@ -59,11 +67,16 @@ export type EventOperationsServiceSnapshot = {
   readonly overCapacityBy: number
   readonly capacityStatus: 'available' | 'near-capacity' | 'over-capacity'
   readonly activeAccountability: AccountabilitySnapshot | null
+  readonly createdEvents: readonly CreatedEvent[]
 }
 
 export type EventOperationsMutationResult = {
   readonly snapshot: EventOperationsServiceSnapshot
   readonly activityEntry: ActivityEntry
+}
+
+export type CreateEventResult = EventOperationsMutationResult & {
+  readonly event: CreatedEvent
 }
 
 export type CheckInAttendeeRequest = {
@@ -87,17 +100,24 @@ export type ResetDemoRequest = {
   readonly actor: OperationsActor
 }
 
+export type ConfirmEventDraftRequest = {
+  readonly draft: EventDraft
+  readonly actor: OperationsActor
+}
+
 export type EventOperationsServiceOptions = {
   readonly store: EventOperationsStore
   readonly authorise: (actor: OperationsActor, operation: EventOperation) => boolean
   readonly now: () => string
-  readonly createId: (kind: 'check-in' | 'activity' | 'accountability-session') => string
+  readonly createId: (kind: 'check-in' | 'activity' | 'accountability-session' | 'event' | 'event-draft') => string
   readonly resetState: () => EventOperationsState
 }
 
 export type EventOperationsService = {
   getSnapshot(): EventOperationsServiceResult<EventOperationsServiceSnapshot>
   searchAttendees(query: string): EventOperationsServiceResult<readonly AttendeeSearchResult[]>
+  prepareEventDraft(input: EventDraftInput): EventOperationsServiceResult<EventDraft>
+  confirmEventDraft(request: ConfirmEventDraftRequest): EventOperationsServiceResult<CreateEventResult>
   checkInAttendee(request: CheckInAttendeeRequest): EventOperationsServiceResult<EventOperationsMutationResult>
   startAccountability(request: StartAccountabilityRequest): EventOperationsServiceResult<EventOperationsMutationResult>
   recordAccountabilityStatus(
@@ -158,6 +178,16 @@ const errors = {
     message: 'The event operation conflicts with the current state.',
     remediation: 'Refresh the event state and retry the operation.',
   }),
+  invalidEventDraft: (): EventOperationsServiceError => ({
+    code: 'invalid_event_draft',
+    message: 'The event draft contains validation errors.',
+    remediation: 'Correct the highlighted fields and review the draft again.',
+  }),
+  eventDraftAlreadyConfirmed: (): EventOperationsServiceError => ({
+    code: 'event_draft_already_confirmed',
+    message: 'This event draft has already been created.',
+    remediation: 'Open the created event or prepare a new draft.',
+  }),
   persistenceFailed: (): EventOperationsServiceError => ({
     code: 'persistence_failed',
     message: 'The event operation could not be saved.',
@@ -186,6 +216,10 @@ function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsSe
     overCapacityBy: eventSnapshot.overCapacityBy,
     capacityStatus: eventSnapshot.capacityStatus,
     activeAccountability: getAccountabilitySnapshot(persisted.state),
+    createdEvents: persisted.state.createdEvents.map((event) => ({
+      ...event,
+      createdBy: { ...event.createdBy },
+    })),
   }
 }
 
@@ -234,6 +268,55 @@ export function createEventOperationsService(
     searchAttendees(query) {
       try {
         return { ok: true, data: findAttendees(options.store.read().state, query) }
+      } catch (error) {
+        return failure(error)
+      }
+    },
+    prepareEventDraft(input) {
+      try {
+        return {
+          ok: true,
+          data: buildEventDraft(input, {
+            draftId: options.createId('event-draft'),
+            preparedAt: options.now(),
+          }),
+        }
+      } catch (error) {
+        return failure(error)
+      }
+    },
+    confirmEventDraft(request) {
+      try {
+        requireAuthorised(options, request.actor, 'create-event')
+        if (request.draft.errors.length > 0) reject(errors.invalidEventDraft())
+        const occurredAt = options.now()
+        const updated = options.store.update((state) => {
+          if (state.createdEvents.some((event) => event.sourceDraftId === request.draft.id)) {
+            reject(errors.eventDraftAlreadyConfirmed())
+          }
+          const transition = applyEventCreation(state, request.draft, {
+            eventId: options.createId('event'),
+            activityId: options.createId('activity'),
+            createdAt: occurredAt,
+            actor: request.actor,
+          })
+          return {
+            state: transition.state,
+            value: {
+              event: transition.event,
+              activityEntry: transition.activityEntry,
+            },
+          }
+        })
+
+        return {
+          ok: true,
+          data: {
+            snapshot: toSnapshot(updated.persisted),
+            event: updated.value.event,
+            activityEntry: updated.value.activityEntry,
+          },
+        }
       } catch (error) {
         return failure(error)
       }
