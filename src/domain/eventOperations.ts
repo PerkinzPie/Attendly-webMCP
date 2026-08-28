@@ -8,6 +8,7 @@ export type OperationsActor = {
 export type EventRecord = {
   readonly id: string
   readonly name: string
+  readonly startsAt: string
   readonly capacity: number
   readonly isSynthetic: true
 }
@@ -250,6 +251,7 @@ function cloneActor(actor: OperationsActor): OperationsActor {
 
 function validateState(state: EventOperationsState) {
   invariant(state.event.capacity > 0, 'Event capacity must be greater than zero')
+  invariant(!Number.isNaN(Date.parse(state.event.startsAt)), 'Event start time must be valid')
   invariant(state.capacityRule.warningThreshold >= 0, 'Capacity warning threshold cannot be negative')
 
   assertUniqueIds('Registration group', state.registrationGroups)

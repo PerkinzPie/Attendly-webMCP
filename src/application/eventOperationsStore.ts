@@ -57,7 +57,7 @@ function clonePersisted(persisted: PersistedEventOperationsState): PersistedEven
   }
 }
 
-function parsePersisted(raw: string): PersistedEventOperationsState {
+function parsePersisted(raw: string, initialState: EventOperationsState): PersistedEventOperationsState {
   const parsed: unknown = JSON.parse(raw)
 
   if (!parsed || typeof parsed !== 'object') {
@@ -75,10 +75,25 @@ function parsePersisted(raw: string): PersistedEventOperationsState {
     throw new Error('Persisted event operations state is missing')
   }
 
+  const storedState = record.state as Record<string, unknown>
+  const storedEvent = storedState.event
+  const migratedState = storedEvent
+    && typeof storedEvent === 'object'
+    && !('startsAt' in storedEvent)
+    && (storedEvent as Record<string, unknown>).id === initialState.event.id
+    ? {
+        ...storedState,
+        event: {
+          ...(storedEvent as Record<string, unknown>),
+          startsAt: initialState.event.startsAt,
+        },
+      }
+    : storedState
+
   return {
     schemaVersion: 1,
     revision: Number(record.revision),
-    state: createEventOperationsState(record.state as EventOperationsState),
+    state: createEventOperationsState(migratedState as EventOperationsState),
   }
 }
 
@@ -106,7 +121,7 @@ export function createPersistentEventOperationsStore(
 
     if (raw) {
       try {
-        return clonePersisted(parsePersisted(raw))
+        return clonePersisted(parsePersisted(raw, options.initialState))
       } catch (error) {
         throw new EventOperationsStoreError('read-failed', 'Persisted event operations state is invalid', error)
       }

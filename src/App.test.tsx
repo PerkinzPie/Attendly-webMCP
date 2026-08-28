@@ -58,8 +58,17 @@ function openOrganisation(name: string) {
   fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'View events' }))
 }
 
+function openManagedEvent(name = 'Riverside Community Workshop') {
+  fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+  const heading = screen.getByRole('heading', { level: 2, name })
+  const row = heading.closest('article')
+  expect(row).not.toBeNull()
+  fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'Open' }))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
+  window.history.replaceState(null, '', '/')
 })
 
 describe('Attendly organisation directory', () => {
@@ -75,7 +84,7 @@ describe('Attendly organisation directory', () => {
     expect(screen.queryByText(/fictional and use synthetic data/i)).not.toBeInTheDocument()
   })
 
-  it('opens event management directly', () => {
+  it('lists events and opens a stable event management context', () => {
     render(<App />)
 
     expect(screen.getByText('Attendly-webMCP')).toBeInTheDocument()
@@ -88,8 +97,21 @@ describe('Attendly organisation directory', () => {
     expect(events).toHaveFocus()
     fireEvent.click(events)
 
+    expect(screen.getByRole('heading', { level: 1, name: 'Events' })).toHaveFocus()
+    expect(window.location.pathname).toBe('/events')
+    const eventRow = screen.getByRole('heading', { level: 2, name: 'Riverside Community Workshop' }).closest('article')
+    expect(eventRow).not.toBeNull()
+    expect(within(eventRow as HTMLElement).getByText('5 Sept 2026, 18:30')).toBeInTheDocument()
+    expect(within(eventRow as HTMLElement).getByText('Capacity').parentElement).toHaveTextContent('20')
+    expect(within(eventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Check-in open')
+
+    fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
     expect(screen.getByRole('heading', { level: 1, name: 'Riverside Community Workshop' })).toHaveFocus()
     expect(screen.getByText('Event management')).toBeInTheDocument()
+    expect(screen.queryByText('Event ID')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Current workspace context')).toHaveTextContent('evt_riverside_community_workshop')
+    expect(window.location.pathname).toBe('/events/evt_riverside_community_workshop')
     expect(events).toHaveAttribute('aria-current', 'page')
     const totals = screen.getByLabelText('Current event totals')
     expect(within(totals).getByText('Registered').nextElementSibling).toHaveTextContent('16')
@@ -105,12 +127,29 @@ describe('Attendly organisation directory', () => {
     const refresh = screen.getByRole('button', { name: 'Refresh live data' })
     expect(refresh).toHaveTextContent('')
     expect(refresh.querySelector('svg')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Browse public events' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Browse public events' })).not.toBeInTheDocument()
+  })
+
+  it('lists the organiser’s published events without opening Riverside operations for them', () => {
+    render(<App operationsService={createTestOperationsService()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+
+    expect(screen.getByText('4 events')).toBeInTheDocument()
+    const publishedEventRow = screen.getByRole('heading', { level: 2, name: 'Family Printmaking Workshop' }).closest('article')
+    expect(publishedEventRow).not.toBeNull()
+    expect(within(publishedEventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Published')
+
+    fireEvent.click(within(publishedEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Family Printmaking Workshop' })).toHaveFocus()
+    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Studio One')
+    expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/events/evt_print_workshop')
   })
 
   it('finds attendees and expands their grouped registration', () => {
     render(<App operationsService={createTestOperationsService()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    openManagedEvent()
     const search = screen.getByPlaceholderText('Search attendees')
 
     fireEvent.change(search, { target: { value: 'Sarah Jenkins' } })
@@ -121,7 +160,11 @@ describe('Attendly organisation directory', () => {
     expect(within(sarahResult as HTMLElement).getByText('Registration RIV-001')).toBeInTheDocument()
     expect(within(sarahResult as HTMLElement).getByText('Not arrived')).toBeInTheDocument()
 
-    fireEvent.click(within(sarahResult as HTMLElement).getByRole('button', { name: 'View registration for Sarah Jenkins' }))
+    const registrationToggle = within(sarahResult as HTMLElement)
+      .getByRole('button', { name: 'View registration for Sarah Jenkins' })
+    expect(registrationToggle).toHaveTextContent('')
+    expect(registrationToggle.querySelector('svg')).toBeInTheDocument()
+    fireEvent.click(registrationToggle)
 
     expect(within(sarahResult as HTMLElement).getByRole('heading', { level: 4, name: 'Registration RIV-001' })).toBeInTheDocument()
     expect(within(sarahResult as HTMLElement).getByText('Leo Jenkins')).toBeInTheDocument()
@@ -142,7 +185,7 @@ describe('Attendly organisation directory', () => {
   it('checks in a selected attendee only after explicit confirmation', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    openManagedEvent()
     fireEvent.change(screen.getByPlaceholderText('Search attendees'), {
       target: { value: 'Sarah Jenkins' },
     })
@@ -213,7 +256,12 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm event' }))
 
     expect(screen.getByText('Event created.')).toBeInTheDocument()
-    expect(screen.getByRole('article', { name: 'Family Games Night' })).toBeInTheDocument()
+    const createdEventRow = screen.getByRole('heading', { level: 2, name: 'Family Games Night' }).closest('article')
+    expect(createdEventRow).not.toBeNull()
+    expect(screen.getByText('5 events')).toBeInTheDocument()
+    expect(within(createdEventRow as HTMLElement).getByText('10 Oct 2026, 18:30')).toBeInTheDocument()
+    expect(within(createdEventRow as HTMLElement).getByText('Capacity').parentElement).toHaveTextContent('40')
+    expect(within(createdEventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Not started')
     expect(service.getSnapshot()).toMatchObject({
       ok: true,
       data: {
@@ -222,17 +270,18 @@ describe('Attendly organisation directory', () => {
       },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close event' }))
-    expect(screen.queryByRole('article', { name: 'Family Games Night' })).not.toBeInTheDocument()
-    const createdEvents = screen.getByRole('heading', { name: 'Created events' }).closest('div')
-    fireEvent.click(within(createdEvents as HTMLElement).getByRole('button', { name: 'Open' }))
-    expect(screen.getByRole('article', { name: 'Family Games Night' })).toBeInTheDocument()
+    fireEvent.click(within(createdEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Family Games Night' })).toHaveFocus()
+    expect(screen.getByText('Event ID').parentElement).toHaveTextContent('event_2')
+    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Main Hall')
+    expect(window.location.pathname).toBe('/events/event_2')
   })
 
   it('updates live totals and announces shared service changes without a page refresh', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    openManagedEvent()
     const initialTotals = screen.getByLabelText('Current event totals')
     expect(within(initialTotals).getByText('Capacity remaining').nextElementSibling).toHaveTextContent('7')
 
@@ -278,7 +327,7 @@ describe('Attendly organisation directory', () => {
       return 1
     })
     render(<App operationsService={service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    openManagedEvent()
 
     const refresh = screen.getByRole('button', { name: 'Refresh live data' })
     fireEvent.click(refresh)
@@ -308,7 +357,7 @@ describe('Attendly organisation directory', () => {
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
   })
 
-  it('resets changed persisted and visible state from an open event', () => {
+  it('resets changed persisted and visible state from the site header while an event is open', () => {
     const service = createTestOperationsService()
     expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
     expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
@@ -318,9 +367,10 @@ describe('Attendly organisation directory', () => {
     const eventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'View event' }))
     const eventDialog = screen.getByRole('dialog', { name: 'Westbrook Autumn Fair' })
+    expect(within(eventDialog).queryByRole('button', { name: 'Reset demo' })).not.toBeInTheDocument()
     fireEvent.click(within(eventDialog).getByRole('button', { name: 'Book free tickets' }))
     fireEvent.change(within(eventDialog).getByLabelText('Your name'), { target: { value: 'Alex Morgan' } })
-    fireEvent.click(within(eventDialog).getByRole('button', { name: 'Reset demo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Find events in your community' })).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({
@@ -342,7 +392,7 @@ describe('Attendly organisation directory', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
     render(<App operationsService={harness.service} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    openManagedEvent()
     harness.failNextWrite()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
@@ -350,6 +400,22 @@ describe('Attendly organisation directory', () => {
     expect(alert).toHaveBeenCalledWith('Reset failed. Please try again.')
     expect(screen.getByRole('alert')).toHaveTextContent('Reset failed. Please try again.')
     expect(harness.service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
+  })
+
+  it('recovers from a stale event link without selecting another event', () => {
+    window.history.replaceState(null, '', '/events/missing-event')
+
+    render(<App operationsService={createTestOperationsService()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Event not found' })).toHaveFocus()
+    expect(screen.getByText('missing-event').parentElement).toHaveTextContent('No event exists with ID missing-event.')
+    expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Events' })).toHaveAttribute('aria-current', 'page')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to events' }))
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Events' })).toHaveFocus()
+    expect(window.location.pathname).toBe('/events')
   })
 
   it('searches organisation attributes and their event catalogue', () => {

@@ -64,6 +64,8 @@ export type EventOperationsServiceSnapshot = {
   readonly event: {
     readonly id: string
     readonly name: string
+    readonly startsAt: string
+    readonly capacity: number
   }
   readonly registrationCount: number
   readonly checkedInCount: number
@@ -227,6 +229,8 @@ function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsSe
     event: {
       id: persisted.state.event.id,
       name: persisted.state.event.name,
+      startsAt: persisted.state.event.startsAt,
+      capacity: persisted.state.event.capacity,
     },
     registrationCount: eventSnapshot.registeredAttendees,
     checkedInCount: eventSnapshot.occupancy,

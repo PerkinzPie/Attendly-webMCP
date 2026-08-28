@@ -92,6 +92,8 @@ describe('event operations application service', () => {
       event: {
         id: 'evt_riverside_community_workshop',
         name: 'Riverside Community Workshop',
+        startsAt: '2026-09-05T18:30:00+01:00',
+        capacity: 20,
       },
       registrationCount: 16,
       checkedInCount: 13,
@@ -398,6 +400,32 @@ describe('event operations application service', () => {
     expect(reloaded).toMatchObject({
       ok: true,
       data: { revision: 1, checkedInCount: 14, notArrivedCount: 2 },
+    })
+  })
+
+  it('adds the event start time when loading state saved by the previous schema shape', () => {
+    const memory = createMemoryStorage()
+    const firstService = createService(createStore(memory.storage))
+    expect(firstService.checkInAttendee({
+      attendeeId: 'att_sarah_jenkins',
+      actor: organiser,
+    }).ok).toBe(true)
+
+    const stored = JSON.parse(memory.storage.getItem('test:event-operations') ?? '') as {
+      state: { event: Record<string, unknown> }
+    }
+    delete stored.state.event.startsAt
+    memory.storage.setItem('test:event-operations', JSON.stringify(stored))
+
+    const reloaded = createService(createStore(memory.storage)).getSnapshot()
+
+    expect(reloaded).toMatchObject({
+      ok: true,
+      data: {
+        revision: 1,
+        checkedInCount: 14,
+        event: { startsAt: '2026-09-05T18:30:00+01:00' },
+      },
     })
   })
 

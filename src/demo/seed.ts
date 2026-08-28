@@ -348,6 +348,11 @@ const operationsEvent: DemoEvent = event({
   bookingClosesLabel: 'Bookings closed 5 September at 17:30',
 })
 
+export const demoManagedEvents: readonly DemoEvent[] = [
+  operationsEvent,
+  ...getOrganisationEvents(operationsEvent.organisationId),
+]
+
 const operationsAttendees: readonly DemoAttendee[] = [
   {
     id: 'att_sarah_jenkins',
@@ -550,6 +555,7 @@ export function createDemoEventOperationsState(): EventOperationsState {
     event: {
       id: seed.event.id,
       name: seed.event.name,
+      startsAt: seed.event.startsAt,
       capacity: seed.event.capacity,
       isSynthetic: true,
     },
