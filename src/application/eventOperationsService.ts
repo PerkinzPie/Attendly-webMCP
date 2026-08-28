@@ -5,6 +5,7 @@ import {
   getAccountabilitySnapshot,
   getEventLastUpdatedAt,
   getEventSnapshot,
+  listActivityTimeline,
   listAttendees as getAttendees,
   prepareAttendeeCheckIn as buildAttendeeCheckInReview,
   prepareEventDraft as buildEventDraft,
@@ -78,6 +79,7 @@ export type EventOperationsServiceSnapshot = {
   readonly overCapacityBy: number
   readonly capacityStatus: 'available' | 'near-capacity' | 'over-capacity'
   readonly anomalies: readonly AttendanceAnomaly[]
+  readonly activityTimeline: readonly ActivityEntry[]
   readonly activeAccountability: AccountabilitySnapshot | null
   readonly createdEvents: readonly CreatedEvent[]
 }
@@ -225,7 +227,10 @@ function reject(detail: EventOperationsServiceError): never {
   throw new ServiceRejection(detail)
 }
 
-function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsServiceSnapshot {
+function toSnapshot(
+  persisted: PersistedEventOperationsState,
+  additionalActivityEntries: readonly ActivityEntry[] = [],
+): EventOperationsServiceSnapshot {
   const eventSnapshot = getEventSnapshot(persisted.state)
   const anomalies = calculateAttendanceAnomalies(persisted.state)
 
@@ -249,6 +254,8 @@ function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsSe
     anomalies: anomalies.map((anomaly) => anomaly.kind === 'duplicate-registration-candidate'
       ? { ...anomaly, candidates: anomaly.candidates.map((candidate) => ({ ...candidate })) }
       : { ...anomaly }),
+    activityTimeline: listActivityTimeline(persisted.state, additionalActivityEntries)
+      .filter((entry) => entry.eventId === persisted.state.event.id),
     activeAccountability: getAccountabilitySnapshot(persisted.state),
     createdEvents: persisted.state.createdEvents.map((event) => ({
       ...event,
@@ -278,6 +285,33 @@ function findAttendee(state: EventOperationsState, attendeeId: string) {
 export function createEventOperationsService(
   options: EventOperationsServiceOptions,
 ): EventOperationsService {
+  let failedActivityEntries: ActivityEntry[] = []
+  const subscribers = new Set<(snapshot: EventOperationsServiceSnapshot) => void>()
+
+  const publish = (persisted: PersistedEventOperationsState) => {
+    const snapshot = toSnapshot(persisted, failedActivityEntries)
+    for (const listener of subscribers) listener(snapshot)
+  }
+
+  options.store.subscribe(publish)
+
+  const toolName = (actor: OperationsActor, name: string) => actor.channel === 'webmcp' ? name : undefined
+
+  const recordFailedWrite = (error: unknown, entry: Omit<ActivityEntry, 'outcome' | 'isSynthetic'>) => {
+    if (!(error instanceof EventOperationsStoreError)) return
+    failedActivityEntries = [...failedActivityEntries, {
+      ...entry,
+      actor: { ...entry.actor },
+      outcome: 'failed',
+      isSynthetic: true,
+    }]
+    try {
+      publish(options.store.read())
+    } catch {
+      // The failed attempt remains available if the store becomes readable again.
+    }
+  }
+
   function mutationResult(
     persisted: PersistedEventOperationsState,
     activityEntry: ActivityEntry,
@@ -285,7 +319,7 @@ export function createEventOperationsService(
     return {
       ok: true,
       data: {
-        snapshot: toSnapshot(persisted),
+        snapshot: toSnapshot(persisted, failedActivityEntries),
         activityEntry,
       },
     }
@@ -294,7 +328,7 @@ export function createEventOperationsService(
   return {
     getSnapshot() {
       try {
-        return { ok: true, data: toSnapshot(options.store.read()) }
+        return { ok: true, data: toSnapshot(options.store.read(), failedActivityEntries) }
       } catch (error) {
         return failure(error)
       }
@@ -352,22 +386,27 @@ export function createEventOperationsService(
       }
     },
     confirmEventDraft(request) {
+      const occurredAt = options.now()
+      const eventId = options.createId('event')
+      const activityId = options.createId('activity')
       try {
         requireAuthorised(options, request.actor, 'create-event')
         if (
           request.draft.errors.length > 0
           || !options.authorisedOrganisationIds.includes(request.draft.organisationId)
         ) reject(errors.invalidEventDraft())
-        const occurredAt = options.now()
         const updated = options.store.update((state) => {
           if (state.createdEvents.some((event) => event.sourceDraftId === request.draft.id)) {
             reject(errors.eventDraftAlreadyConfirmed())
           }
           const transition = applyEventCreation(state, request.draft, {
-            eventId: options.createId('event'),
-            activityId: options.createId('activity'),
+            eventId,
+            activityId,
             createdAt: occurredAt,
             actor: request.actor,
+            ...(toolName(request.actor, 'confirm_event_draft')
+              ? { toolName: 'confirm_event_draft' }
+              : {}),
           })
           return {
             state: transition.state,
@@ -381,31 +420,49 @@ export function createEventOperationsService(
         return {
           ok: true,
           data: {
-            snapshot: toSnapshot(updated.persisted),
+            snapshot: toSnapshot(updated.persisted, failedActivityEntries),
             event: updated.value.event,
             activityEntry: updated.value.activityEntry,
           },
         }
       } catch (error) {
+        recordFailedWrite(error, {
+          id: activityId,
+          eventId,
+          action: 'event-created',
+          targetId: eventId,
+          targetLabel: request.draft.name || 'Event draft',
+          actor: request.actor,
+          occurredAt,
+          resultSummary: 'Event creation was not saved.',
+          ...(toolName(request.actor, 'confirm_event_draft') ? { toolName: 'confirm_event_draft' } : {}),
+        })
         return failure(error)
       }
     },
     checkInAttendee(request) {
+      const occurredAt = options.now()
+      const checkInId = options.createId('check-in')
+      const activityId = options.createId('activity')
+      let targetLabel = request.attendeeId
+      let eventId = 'event'
       try {
         requireAuthorised(options, request.actor, 'check-in-attendee')
-        const occurredAt = options.now()
         const updated = options.store.update((state) => {
+          eventId = state.event.id
           findAttendee(state, request.attendeeId)
+          targetLabel = state.attendees.find((attendee) => attendee.id === request.attendeeId)?.name ?? targetLabel
           if (state.checkIns.some((checkIn) => checkIn.attendeeId === request.attendeeId)) {
             reject(errors.attendeeAlreadyCheckedIn())
           }
 
           const transition = applyCheckIn(state, {
-            checkInId: options.createId('check-in'),
-            activityId: options.createId('activity'),
+            checkInId,
+            activityId,
             attendeeId: request.attendeeId,
             checkedInAt: occurredAt,
             actor: request.actor,
+            ...(toolName(request.actor, 'check_in_attendee') ? { toolName: 'check_in_attendee' } : {}),
             ...(request.reason ? { reason: request.reason } : {}),
           })
           return { state: transition.state, value: transition.activityEntry }
@@ -413,38 +470,75 @@ export function createEventOperationsService(
 
         return mutationResult(updated.persisted, updated.value)
       } catch (error) {
+        recordFailedWrite(error, {
+          id: activityId,
+          eventId,
+          action: 'attendee-checked-in',
+          targetId: request.attendeeId,
+          targetLabel,
+          actor: request.actor,
+          occurredAt,
+          resultSummary: 'Check-in was not saved.',
+          ...(toolName(request.actor, 'check_in_attendee') ? { toolName: 'check_in_attendee' } : {}),
+          ...(request.reason ? { note: request.reason } : {}),
+        })
         return failure(error)
       }
     },
     startAccountability(request) {
+      const occurredAt = options.now()
+      const sessionId = options.createId('accountability-session')
+      const activityId = options.createId('activity')
+      let eventId = 'event'
       try {
         requireAuthorised(options, request.actor, 'start-accountability')
-        const occurredAt = options.now()
         const updated = options.store.update((state) => {
+          eventId = state.event.id
           if (state.accountabilitySession) reject(errors.accountabilityAlreadyActive())
 
           const transition = applyAccountabilityStart(state, {
-            sessionId: options.createId('accountability-session'),
-            activityId: options.createId('activity'),
+            sessionId,
+            activityId,
             startedAt: occurredAt,
             actor: request.actor,
+            ...(toolName(request.actor, 'start_evacuation_accountability')
+              ? { toolName: 'start_evacuation_accountability' }
+              : {}),
           })
           return { state: transition.state, value: transition.activityEntry }
         })
 
         return mutationResult(updated.persisted, updated.value)
       } catch (error) {
+        recordFailedWrite(error, {
+          id: activityId,
+          eventId,
+          action: 'accountability-started',
+          targetId: sessionId,
+          targetLabel: 'Evacuation accountability',
+          actor: request.actor,
+          occurredAt,
+          resultSummary: 'Accountability start was not saved.',
+          ...(toolName(request.actor, 'start_evacuation_accountability')
+            ? { toolName: 'start_evacuation_accountability' }
+            : {}),
+        })
         return failure(error)
       }
     },
     recordAccountabilityStatus(request) {
+      const occurredAt = options.now()
+      const activityId = options.createId('activity')
+      let eventId = 'event'
+      let targetLabel = request.attendeeId
       try {
         requireAuthorised(options, request.actor, 'record-accountability-status')
         if (!['unconfirmed', 'accounted-for', 'exempt-not-present'].includes(request.status)) {
           reject(errors.invalidCommand())
         }
-        const occurredAt = options.now()
         const updated = options.store.update((state) => {
+          eventId = state.event.id
+          targetLabel = state.attendees.find((attendee) => attendee.id === request.attendeeId)?.name ?? targetLabel
           const session = state.accountabilitySession
           if (!session) reject(errors.accountabilityNotActive())
           if (!session.records.some((record) => record.attendeeId === request.attendeeId)) {
@@ -454,9 +548,12 @@ export function createEventOperationsService(
           const transition = applyAccountabilityStatus(state, {
             attendeeId: request.attendeeId,
             status: request.status,
-            activityId: options.createId('activity'),
+            activityId,
             recordedAt: occurredAt,
             actor: request.actor,
+            ...(toolName(request.actor, 'record_accountability_status')
+              ? { toolName: 'record_accountability_status' }
+              : {}),
             ...(request.note ? { note: request.note } : {}),
           })
           return { state: transition.state, value: transition.activityEntry }
@@ -464,24 +561,59 @@ export function createEventOperationsService(
 
         return mutationResult(updated.persisted, updated.value)
       } catch (error) {
+        recordFailedWrite(error, {
+          id: activityId,
+          eventId,
+          action: 'accountability-status-recorded',
+          targetId: request.attendeeId,
+          targetLabel,
+          actor: request.actor,
+          occurredAt,
+          resultSummary: 'Accountability update was not saved.',
+          ...(toolName(request.actor, 'record_accountability_status')
+            ? { toolName: 'record_accountability_status' }
+            : {}),
+          ...(request.note ? { note: request.note } : {}),
+        })
         return failure(error)
       }
     },
     resetDemo(request) {
+      const occurredAt = options.now()
+      const activityId = options.createId('activity')
+      let eventId = 'event'
+      const priorFailedActivityEntries = failedActivityEntries
       try {
         requireAuthorised(options, request.actor, 'reset-demo')
-        const updated = options.store.update(() => ({
-          state: options.resetState(),
-          value: null,
-        }))
+        failedActivityEntries = []
+        const updated = options.store.update((state) => {
+          eventId = state.event.id
+          return {
+            state: options.resetState(),
+            value: null,
+          }
+        })
 
         return { ok: true, data: toSnapshot(updated.persisted) }
       } catch (error) {
+        failedActivityEntries = priorFailedActivityEntries
+        recordFailedWrite(error, {
+          id: activityId,
+          eventId,
+          action: 'demo-reset',
+          targetId: 'demo-state',
+          targetLabel: 'Demo state',
+          actor: request.actor,
+          occurredAt,
+          resultSummary: 'Reset was not saved.',
+          ...(toolName(request.actor, 'reset_demo') ? { toolName: 'reset_demo' } : {}),
+        })
         return failure(error)
       }
     },
     subscribe(listener) {
-      return options.store.subscribe((persisted) => listener(toSnapshot(persisted)))
+      subscribers.add(listener)
+      return () => subscribers.delete(listener)
     },
   }
 }

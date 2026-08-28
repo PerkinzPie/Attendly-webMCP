@@ -49,10 +49,14 @@ export type CapacityRule = {
 export type ActivityEntry = {
   readonly id: string
   readonly eventId: string
-  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded' | 'event-created'
+  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded' | 'event-created' | 'demo-reset'
   readonly targetId: string
+  readonly targetLabel: string
   readonly actor: OperationsActor
   readonly occurredAt: string
+  readonly outcome: 'succeeded' | 'failed'
+  readonly resultSummary: string
+  readonly toolName?: string
   readonly note?: string
   readonly isSynthetic: true
 }
@@ -237,6 +241,7 @@ export type CheckInAttendeeCommand = {
   readonly attendeeId: string
   readonly checkedInAt: string
   readonly actor: OperationsActor
+  readonly toolName?: string
   readonly reason?: string
 }
 
@@ -250,6 +255,7 @@ export type StartAccountabilityCommand = {
   readonly activityId: string
   readonly startedAt: string
   readonly actor: OperationsActor
+  readonly toolName?: string
 }
 
 export type RecordAccountabilityCommand = {
@@ -258,6 +264,7 @@ export type RecordAccountabilityCommand = {
   readonly activityId: string
   readonly recordedAt: string
   readonly actor: OperationsActor
+  readonly toolName?: string
   readonly note?: string
 }
 
@@ -272,6 +279,7 @@ export type ConfirmEventDraftCommand = {
   readonly activityId: string
   readonly createdAt: string
   readonly actor: OperationsActor
+  readonly toolName?: string
 }
 
 function invariant(condition: unknown, message: string): asserts condition {
@@ -341,6 +349,9 @@ function validateState(state: EventOperationsState) {
 
   for (const entry of state.activityEntries) {
     invariant(eventIds.has(entry.eventId), `Activity entry ${entry.id} belongs to another event`)
+    invariant(entry.targetLabel.length > 0, `Activity entry ${entry.id} must identify its target`)
+    invariant(entry.resultSummary.length > 0, `Activity entry ${entry.id} must summarise its result`)
+    invariant(!Number.isNaN(Date.parse(entry.occurredAt)), `Activity entry ${entry.id} must have a valid timestamp`)
   }
 
   const session = state.accountabilitySession
@@ -501,6 +512,18 @@ export function getEventLastUpdatedAt(state: EventOperationsState): string | nul
   }, null)
 }
 
+export function listActivityTimeline(
+  state: EventOperationsState,
+  additionalEntries: readonly ActivityEntry[] = [],
+): readonly ActivityEntry[] {
+  return [...state.activityEntries, ...additionalEntries]
+    .map((entry) => ({ ...entry, actor: cloneActor(entry.actor) }))
+    .sort((left, right) => (
+      Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
+      || right.id.localeCompare(left.id, 'en-GB')
+    ))
+}
+
 export function getAccountabilitySnapshot(state: EventOperationsState): AccountabilitySnapshot | null {
   const session = state.accountabilitySession
   if (!session) return null
@@ -586,8 +609,12 @@ export function confirmEventDraft(
     eventId: event.id,
     action: 'event-created',
     targetId: event.id,
+    targetLabel: event.name,
     actor: cloneActor(command.actor),
     occurredAt: command.createdAt,
+    outcome: 'succeeded',
+    resultSummary: `Created with capacity ${event.capacity}.`,
+    ...(command.toolName ? { toolName: command.toolName } : {}),
     isSynthetic: true,
   }
   const nextState = createEventOperationsState({
@@ -696,7 +723,8 @@ export function checkInAttendee(
   state: EventOperationsState,
   command: CheckInAttendeeCommand,
 ): CheckInTransition {
-  invariant(state.attendees.some((attendee) => attendee.id === command.attendeeId), 'Attendee does not exist')
+  const attendee = state.attendees.find((item) => item.id === command.attendeeId)
+  invariant(attendee, 'Attendee does not exist')
   invariant(
     !state.checkIns.some((checkIn) => checkIn.attendeeId === command.attendeeId),
     'Attendee is already checked in',
@@ -716,8 +744,12 @@ export function checkInAttendee(
     eventId: state.event.id,
     action: 'attendee-checked-in',
     targetId: command.attendeeId,
+    targetLabel: attendee.name,
     actor: cloneActor(command.actor),
     occurredAt: command.checkedInAt,
+    outcome: 'succeeded',
+    resultSummary: `Checked in · ${getEventSnapshot(state).occupancy + 1} of ${state.event.capacity}.`,
+    ...(command.toolName ? { toolName: command.toolName } : {}),
     ...(command.reason ? { note: command.reason } : {}),
     isSynthetic: true,
   }
@@ -762,8 +794,12 @@ export function startAccountabilitySession(
     eventId: state.event.id,
     action: 'accountability-started',
     targetId: session.id,
+    targetLabel: 'Evacuation accountability',
     actor: cloneActor(command.actor),
     occurredAt: command.startedAt,
+    outcome: 'succeeded',
+    resultSummary: `Started for ${session.records.length} checked-in attendees.`,
+    ...(command.toolName ? { toolName: command.toolName } : {}),
     isSynthetic: true,
   }
   const nextState = createEventOperationsState({
@@ -797,13 +833,25 @@ export function recordAccountabilityStatus(
     updatedBy: cloneActor(command.actor),
     ...(command.note ? { note: command.note } : {}),
   } : record)
+  const attendee = state.attendees.find((item) => item.id === command.attendeeId)
+  invariant(attendee, 'Attendee does not exist')
+  const accountedFor = records.filter((record) => record.status === 'accounted-for').length
+  const statusLabel = command.status === 'accounted-for'
+    ? 'Accounted for'
+    : command.status === 'exempt-not-present'
+      ? 'Exempt — not present'
+      : 'Unconfirmed'
   const activityEntry: ActivityEntry = {
     id: command.activityId,
     eventId: state.event.id,
     action: 'accountability-status-recorded',
     targetId: command.attendeeId,
+    targetLabel: attendee.name,
     actor: cloneActor(command.actor),
     occurredAt: command.recordedAt,
+    outcome: 'succeeded',
+    resultSummary: `${statusLabel} · ${accountedFor} of ${records.length} accounted for.`,
+    ...(command.toolName ? { toolName: command.toolName } : {}),
     ...(command.note ? { note: command.note } : {}),
     isSynthetic: true,
   }

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { createDemoEventOperationsState } from '../demo/seed'
 import {
   calculateAttendanceAnomalies,
+  checkInAttendee,
   confirmEventDraft,
   createEventOperationsState,
   getAccountabilitySnapshot,
   getEventLastUpdatedAt,
   getEventSnapshot,
+  listActivityTimeline,
   listAttendees,
   prepareAttendeeCheckIn,
   recordAccountabilityStatus,
@@ -338,7 +340,10 @@ describe('event operations domain', () => {
       action: 'event-created',
       eventId: 'evt_community_supper',
       targetId: 'evt_community_supper',
+      targetLabel: 'Community Supper',
       actor: organiser,
+      outcome: 'succeeded',
+      resultSummary: 'Created with capacity 40.',
     })
     expect(() => confirmEventDraft(transition.state, draft, {
       eventId: 'evt_duplicate',
@@ -375,8 +380,11 @@ describe('event operations domain', () => {
     })
     expect(transition.activityEntry).toMatchObject({
       action: 'accountability-started',
+      targetLabel: 'Evacuation accountability',
       actor: organiser,
       occurredAt: '2026-09-05T18:20:00+01:00',
+      outcome: 'succeeded',
+      resultSummary: 'Started for 13 checked-in attendees.',
     })
   })
 
@@ -410,9 +418,36 @@ describe('event operations domain', () => {
     expect(transition.activityEntry).toMatchObject({
       action: 'accountability-status-recorded',
       targetId: 'att_amina_patel',
+      targetLabel: 'Amina Patel',
       actor: agent,
+      outcome: 'succeeded',
+      resultSummary: 'Accounted for · 1 of 13 accounted for.',
     })
     expect(transition.state.activityEntries).toHaveLength(2)
+  })
+
+  it('returns an immutable activity timeline in deterministic reverse chronological order', () => {
+    const checkedIn = checkInAttendee(createDemoEventOperationsState(), {
+      checkInId: 'check_in_sarah',
+      activityId: 'activity_a',
+      attendeeId: 'att_sarah_jenkins',
+      checkedInAt: '2026-09-05T18:30:00+01:00',
+      actor: organiser,
+    })
+    const additionalEntry = {
+      ...checkedIn.activityEntry,
+      id: 'activity_z',
+      outcome: 'failed' as const,
+      resultSummary: 'Check-in was not saved.',
+    }
+    const before = JSON.stringify(checkedIn.state.activityEntries)
+
+    const timeline = listActivityTimeline(checkedIn.state, [additionalEntry])
+
+    expect(timeline.map((entry) => entry.id)).toEqual(['activity_z', 'activity_a'])
+    expect(timeline.map((entry) => entry.outcome)).toEqual(['failed', 'succeeded'])
+    expect(JSON.stringify(checkedIn.state.activityEntries)).toBe(before)
+    expect(timeline[0].actor).not.toBe(additionalEntry.actor)
   })
 
   it('rejects people outside the active session without changing state', () => {

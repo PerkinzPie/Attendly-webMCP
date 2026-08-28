@@ -140,6 +140,7 @@ describe('event operations application service', () => {
           ],
         },
       ],
+      activityTimeline: [],
       activeAccountability: null,
       createdEvents: [],
     })
@@ -161,6 +162,7 @@ describe('event operations application service', () => {
     expect(result.data.map((attendee) => attendee.name)).toEqual(['Sarah Jenkins', 'Leo Jenkins'])
     expect(JSON.stringify(store.read())).toBe(before)
     expect(notifications).toBe(0)
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { activityTimeline: [] } })
   })
 
   it('lists attendees that reconcile with the current snapshot', () => {
@@ -422,6 +424,7 @@ describe('event operations application service', () => {
     })
     expect(JSON.stringify(store.read())).toBe(before)
     expect(notifications).toBe(0)
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { activityTimeline: [] } })
   })
 
   it('leaves the prior state intact when persistence fails', () => {
@@ -447,7 +450,18 @@ describe('event operations application service', () => {
       },
     })
     expect(JSON.stringify(store.read())).toBe(before)
-    expect(notifications).toBe(0)
+    expect(notifications).toBe(1)
+    expect(service.getSnapshot()).toMatchObject({
+      ok: true,
+      data: {
+        activityTimeline: [{
+          action: 'attendee-checked-in',
+          targetLabel: 'Sarah Jenkins',
+          outcome: 'failed',
+          resultSummary: 'Check-in was not saved.',
+        }],
+      },
+    })
   })
 
   it('reloads committed state through a new service instance', () => {
@@ -479,6 +493,7 @@ describe('event operations application service', () => {
         event: Record<string, unknown>
         createdEvents: Array<Record<string, unknown>>
         attendees: Array<Record<string, unknown>>
+        activityEntries: Array<Record<string, unknown>>
       }
     }
     delete stored.state.event.startsAt
@@ -495,6 +510,11 @@ describe('event operations application service', () => {
       isSynthetic: true,
     }]
     stored.state.attendees.forEach((attendee) => delete attendee.email)
+    stored.state.activityEntries.forEach((entry) => {
+      delete entry.targetLabel
+      delete entry.outcome
+      delete entry.resultSummary
+    })
     memory.storage.setItem('test:event-operations', JSON.stringify(stored))
 
     const reloaded = createService(createStore(memory.storage)).getSnapshot()
@@ -508,6 +528,11 @@ describe('event operations application service', () => {
           organisationId: 'org_lantern_rooms',
           startsAt: '2026-09-05T18:30:00+01:00',
         },
+        activityTimeline: [{
+          targetLabel: 'att_sarah_jenkins',
+          outcome: 'succeeded',
+          resultSummary: 'Completed successfully.',
+        }],
         createdEvents: [{ id: 'event_legacy', organisationId: 'org_lantern_rooms' }],
       },
     })
@@ -536,11 +561,26 @@ describe('event operations application service', () => {
     expect(agentResult.ok).toBe(true)
     if (!humanResult.ok || !agentResult.ok) throw new Error('Expected both interfaces to succeed')
 
-    expect(agentResult.data.snapshot).toEqual(humanResult.data.snapshot)
+    const { activityTimeline: agentTimeline, ...agentSnapshot } = agentResult.data.snapshot
+    const { activityTimeline: humanTimeline, ...humanSnapshot } = humanResult.data.snapshot
+    expect(agentSnapshot).toEqual(humanSnapshot)
+    expect(humanTimeline[0]).toMatchObject({
+      actor: { channel: 'human-ui' },
+      outcome: 'succeeded',
+      targetLabel: 'Sarah Jenkins',
+      resultSummary: 'Checked in · 14 of 20.',
+    })
+    expect(agentTimeline[0]).toMatchObject({
+      actor: { channel: 'webmcp' },
+      toolName: 'check_in_attendee',
+      outcome: 'succeeded',
+      targetLabel: 'Sarah Jenkins',
+      resultSummary: 'Checked in · 14 of 20.',
+    })
     expect(agentStore.read().state.checkIns.map(({ actor: _actor, ...checkIn }) => checkIn))
       .toEqual(humanStore.read().state.checkIns.map(({ actor: _actor, ...checkIn }) => checkIn))
-    expect(agentStore.read().state.activityEntries.map(({ actor: _actor, ...entry }) => entry))
-      .toEqual(humanStore.read().state.activityEntries.map(({ actor: _actor, ...entry }) => entry))
+    expect(agentStore.read().state.activityEntries.map(({ actor: _actor, toolName: _toolName, ...entry }) => entry))
+      .toEqual(humanStore.read().state.activityEntries.map(({ actor: _actor, toolName: _toolName, ...entry }) => entry))
   })
 
   it('atomically restores the deterministic seed and publishes the reset state', () => {
@@ -598,7 +638,7 @@ describe('event operations application service', () => {
 
     expect(result).toMatchObject({ ok: false, error: { code: 'persistence_failed' } })
     expect(JSON.stringify(store.read())).toBe(before)
-    expect(notifications).toBe(0)
+    expect(notifications).toBe(1)
   })
 
   it('rejects an unauthorised caller before changing persisted state', () => {

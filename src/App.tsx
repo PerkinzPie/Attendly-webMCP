@@ -5,7 +5,13 @@ import type {
   EventOperationsService,
   EventOperationsServiceSnapshot,
 } from './application/eventOperationsService'
-import type { AttendeeCheckInReview, AttendeeSearchResult, CreatedEvent, EventDraft } from './domain/eventOperations'
+import type {
+  ActivityEntry,
+  AttendeeCheckInReview,
+  AttendeeSearchResult,
+  CreatedEvent,
+  EventDraft,
+} from './domain/eventOperations'
 import {
   demoEvents,
   demoManagedEvents,
@@ -179,6 +185,28 @@ function formatUpdatedTime(updatedAt: string) {
     minute: '2-digit',
     timeZone: 'Europe/London',
   }).format(new Date(updatedAt))
+}
+
+function formatActivityTime(occurredAt: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/London',
+  }).format(new Date(occurredAt))
+}
+
+function getActivityActionLabel(action: ActivityEntry['action']) {
+  const labels: Record<ActivityEntry['action'], string> = {
+    'attendee-checked-in': 'Attendee checked in',
+    'accountability-started': 'Accountability started',
+    'accountability-status-recorded': 'Accountability updated',
+    'event-created': 'Event created',
+    'demo-reset': 'Demo reset',
+  }
+
+  return labels[action]
 }
 
 function EventCreationWorkspace({
@@ -561,9 +589,6 @@ function OperationsWorkspace({
   const [checkInReview, setCheckInReview] = useState<AttendeeCheckInReview | null>(null)
   const [checkInFeedback, setCheckInFeedback] = useState<{ type: 'error' | 'success', message: string } | null>(null)
   const attendeeSearchRef = useRef<HTMLInputElement>(null)
-  const accountabilityLabel = snapshot?.activeAccountability
-    ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
-    : 'Not started'
   const trimmedAttendeeQuery = attendeeQuery.trim()
   const attendeeListResult = trimmedAttendeeQuery
     ? onSearchAttendees(trimmedAttendeeQuery)
@@ -575,6 +600,7 @@ function OperationsWorkspace({
     ? attendeeResults.length === 1 ? 'match' : 'matches'
     : attendeeResults.length === 1 ? 'attendee' : 'attendees'}`
   const anomalies = snapshot?.anomalies ?? []
+  const activityTimeline = snapshot?.activityTimeline ?? []
 
   const updateAttendeeQuery = (query: string) => {
     setAttendeeQuery(query)
@@ -856,11 +882,36 @@ function OperationsWorkspace({
 
             </div>
 
-            <div className="workspace-strip" aria-label="Current workspace context">
-              <div><span>Event</span><strong>{snapshot.event.id}</strong></div>
-              <div><span>Accountability</span><strong>{accountabilityLabel}</strong></div>
-              <div><span>Shared revision</span><strong>{snapshot.revision}</strong></div>
-            </div>
+            <details className="activity-timeline">
+              <summary>
+                <span role="heading" aria-level={2}>Activity</span>
+                <span>{activityTimeline.length}</span>
+              </summary>
+              {activityTimeline.length === 0 ? (
+                <p className="activity-empty">No activity yet.</p>
+              ) : (
+                <ol>
+                  {activityTimeline.map((entry) => (
+                    <li className={entry.outcome} key={entry.id}>
+                      <time dateTime={entry.occurredAt}>{formatActivityTime(entry.occurredAt)}</time>
+                      <div className="activity-description">
+                        <strong>{getActivityActionLabel(entry.action)}</strong>
+                        <span>{entry.targetLabel}</span>
+                        <p>{entry.resultSummary}</p>
+                      </div>
+                      <div className="activity-attribution">
+                        <span>
+                          {entry.actor.channel === 'webmcp'
+                            ? `Site tool · ${entry.toolName ?? entry.actor.displayName}`
+                            : `Human · ${entry.actor.displayName}`}
+                        </span>
+                        <strong>{entry.outcome === 'failed' ? 'Failed' : 'Completed'}</strong>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </details>
           </>
         ) : null}
       </div>

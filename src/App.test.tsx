@@ -111,7 +111,8 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Riverside Community Workshop' })).toHaveFocus()
     expect(screen.getByText('The Lantern Rooms')).toBeInTheDocument()
     expect(screen.queryByText('Event ID')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Current workspace context')).toHaveTextContent('evt_riverside_community_workshop')
+    expect(screen.queryByText('evt_riverside_community_workshop')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Activity' })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/organisations/org_lantern_rooms/events/evt_riverside_community_workshop')
     expect(events).toHaveAttribute('aria-current', 'page')
     const totals = screen.getByLabelText('Current event totals')
@@ -241,6 +242,16 @@ describe('Attendly organisation directory', () => {
     const sarahResult = screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' }).closest('article')
     expect(within(sarahResult as HTMLElement).getByText('Checked in')).toBeInTheDocument()
     expect(within(sarahResult as HTMLElement).queryByRole('button', { name: 'Check in Sarah Jenkins' })).not.toBeInTheDocument()
+
+    const activity = screen.getByRole('heading', { level: 2, name: 'Activity' }).closest('details')
+    expect(activity).not.toBeNull()
+    fireEvent.click(within(activity as HTMLElement).getByText('Activity'))
+    expect(within(activity as HTMLElement).getByText('Attendee checked in')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('Sarah Jenkins')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('Checked in · 14 of 20.')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('Human · Event manager')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('Completed')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('5 Sept, 18:30')).toBeInTheDocument()
   })
 
   it('validates and cancels an event draft without persisting it', () => {
@@ -473,6 +484,11 @@ describe('Attendly organisation directory', () => {
     expect(alert).toHaveBeenCalledWith('Reset failed. Please try again.')
     expect(screen.getByRole('alert')).toHaveTextContent('Reset failed. Please try again.')
     expect(harness.service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
+    const activity = screen.getByRole('heading', { level: 2, name: 'Activity' }).closest('details')
+    fireEvent.click(within(activity as HTMLElement).getByText('Activity'))
+    expect(within(activity as HTMLElement).getByText('Demo reset')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('Reset was not saved.')).toBeInTheDocument()
+    expect(within(activity as HTMLElement).getByText('Failed')).toBeInTheDocument()
   })
 
   it('recovers from a stale event link without selecting another event', () => {

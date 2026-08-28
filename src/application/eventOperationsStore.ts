@@ -101,11 +101,24 @@ function parsePersisted(raw: string, initialState: EventOperationsState): Persis
         return initialAttendee ? { ...attendee, email: initialAttendee.email } : attendee
       })
     : storedState.attendees
+  const migratedActivityEntries = Array.isArray(storedState.activityEntries)
+    ? storedState.activityEntries.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry
+        const activity = entry as Record<string, unknown>
+        return {
+          ...activity,
+          ...(!('targetLabel' in activity) ? { targetLabel: String(activity.targetId ?? 'Event operation') } : {}),
+          ...(!('outcome' in activity) ? { outcome: 'succeeded' } : {}),
+          ...(!('resultSummary' in activity) ? { resultSummary: 'Completed successfully.' } : {}),
+        }
+      })
+    : storedState.activityEntries
   const migratedState = {
     ...storedState,
     event: migratedEvent,
     createdEvents: migratedCreatedEvents,
     attendees: migratedAttendees,
+    activityEntries: migratedActivityEntries,
   }
 
   return {
