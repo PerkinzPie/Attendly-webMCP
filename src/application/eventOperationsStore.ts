@@ -93,10 +93,19 @@ function parsePersisted(raw: string, initialState: EventOperationsState): Persis
       ? { ...event, organisationId: initialState.event.organisationId }
       : event)
     : storedState.createdEvents
+  const initialAttendeesById = new Map(initialState.attendees.map((attendee) => [attendee.id, attendee]))
+  const migratedAttendees = Array.isArray(storedState.attendees)
+    ? storedState.attendees.map((attendee) => {
+        if (!attendee || typeof attendee !== 'object' || 'email' in attendee) return attendee
+        const initialAttendee = initialAttendeesById.get(String((attendee as Record<string, unknown>).id))
+        return initialAttendee ? { ...attendee, email: initialAttendee.email } : attendee
+      })
+    : storedState.attendees
   const migratedState = {
     ...storedState,
     event: migratedEvent,
     createdEvents: migratedCreatedEvents,
+    attendees: migratedAttendees,
   }
 
   return {

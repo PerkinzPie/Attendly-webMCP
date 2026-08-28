@@ -27,6 +27,7 @@ export type Attendee = {
   readonly eventId: string
   readonly registrationGroupId: string
   readonly name: string
+  readonly email: string
   readonly assistanceRequirement?: string
   readonly isSynthetic: true
 }
@@ -148,6 +149,7 @@ export type AccountabilitySnapshot = {
 export type AttendeeSearchResult = {
   readonly attendeeId: string
   readonly name: string
+  readonly email: string
   readonly registrationGroup: {
     readonly id: string
     readonly reference: string
@@ -173,6 +175,36 @@ export type AttendeeCheckInReview = {
   readonly capacityWarning: string | null
   readonly reason: string
 }
+
+export type CapacityRiskAnomaly = {
+  readonly id: string
+  readonly eventId: string
+  readonly kind: 'near-capacity' | 'over-capacity'
+  readonly severity: 'warning' | 'critical'
+  readonly currentOccupancy: number
+  readonly registeredAttendees: number
+  readonly capacity: number
+  readonly remainingPlaces: number
+  readonly overCapacityBy: number
+  readonly warningThreshold: number
+}
+
+export type DuplicateRegistrationCandidateAnomaly = {
+  readonly id: string
+  readonly eventId: string
+  readonly kind: 'duplicate-registration-candidate'
+  readonly severity: 'warning'
+  readonly reason: string
+  readonly matchingEmail: string
+  readonly candidates: readonly {
+    readonly attendeeId: string
+    readonly attendeeName: string
+    readonly registrationGroupId: string
+    readonly registrationReference: string
+  }[]
+}
+
+export type AttendanceAnomaly = CapacityRiskAnomaly | DuplicateRegistrationCandidateAnomaly
 
 export type OperationsTransition = {
   readonly state: EventOperationsState
@@ -284,6 +316,7 @@ function validateState(state: EventOperationsState) {
     const group = groupsById.get(attendee.registrationGroupId)
     invariant(attendee.eventId === state.event.id, `Attendee ${attendee.id} belongs to another event`)
     invariant(group?.attendeeIds.includes(attendee.id), `Attendee ${attendee.id} is not linked from its registration group`)
+    invariant(attendee.email.length > 0, `Attendee ${attendee.id} must have an email address`)
   }
 
   const checkedInAttendeeIds = new Set<string>()
@@ -377,6 +410,77 @@ export function getEventSnapshot(state: EventOperationsState): EventSnapshot {
     overCapacityBy,
     capacityStatus,
   }
+}
+
+export function calculateAttendanceAnomalies(state: EventOperationsState): readonly AttendanceAnomaly[] {
+  const anomalies: AttendanceAnomaly[] = []
+  const currentOccupancy = new Set(state.checkIns.map((checkIn) => checkIn.attendeeId)).size
+  const registeredAttendees = state.attendees.length
+  const rawRemainingPlaces = state.event.capacity - registeredAttendees
+  const overCapacityBy = Math.max(0, -rawRemainingPlaces)
+  const remainingPlaces = Math.max(0, rawRemainingPlaces)
+
+  if (overCapacityBy > 0) {
+    anomalies.push({
+      id: `anomaly:${state.event.id}:over-capacity`,
+      eventId: state.event.id,
+      kind: 'over-capacity',
+      severity: 'critical',
+      currentOccupancy,
+      registeredAttendees,
+      capacity: state.event.capacity,
+      remainingPlaces,
+      overCapacityBy,
+      warningThreshold: state.capacityRule.warningThreshold,
+    })
+  } else if (remainingPlaces <= state.capacityRule.warningThreshold) {
+    anomalies.push({
+      id: `anomaly:${state.event.id}:near-capacity`,
+      eventId: state.event.id,
+      kind: 'near-capacity',
+      severity: 'warning',
+      currentOccupancy,
+      registeredAttendees,
+      capacity: state.event.capacity,
+      remainingPlaces,
+      overCapacityBy,
+      warningThreshold: state.capacityRule.warningThreshold,
+    })
+  }
+
+  const registrationGroupsById = new Map(state.registrationGroups.map((group) => [group.id, group]))
+  const attendeesByEmail = new Map<string, Attendee[]>()
+  for (const attendee of state.attendees) {
+    const normalisedEmail = attendee.email.trim().toLocaleLowerCase('en-GB')
+    const matches = attendeesByEmail.get(normalisedEmail) ?? []
+    matches.push(attendee)
+    attendeesByEmail.set(normalisedEmail, matches)
+  }
+
+  for (const [matchingEmail, attendees] of attendeesByEmail) {
+    if (new Set(attendees.map((attendee) => attendee.registrationGroupId)).size < 2) continue
+    const candidates = attendees.map((attendee) => {
+      const group = registrationGroupsById.get(attendee.registrationGroupId)
+      invariant(group, `Attendee ${attendee.id} has no registration group`)
+      return {
+        attendeeId: attendee.id,
+        attendeeName: attendee.name,
+        registrationGroupId: group.id,
+        registrationReference: group.reference,
+      }
+    })
+    anomalies.push({
+      id: `anomaly:${state.event.id}:duplicate-registration:${candidates.map((candidate) => candidate.attendeeId).join(':')}`,
+      eventId: state.event.id,
+      kind: 'duplicate-registration-candidate',
+      severity: 'warning',
+      reason: 'The same email address appears on separate registrations.',
+      matchingEmail,
+      candidates,
+    })
+  }
+
+  return anomalies
 }
 
 export function getEventLastUpdatedAt(state: EventOperationsState): string | null {
@@ -508,6 +612,7 @@ export function listAttendees(state: EventOperationsState): readonly AttendeeSea
     return {
       attendeeId: attendee.id,
       name: attendee.name,
+      email: attendee.email,
       registrationGroup: {
         id: group.id,
         reference: group.reference,
@@ -536,17 +641,19 @@ export function searchAttendees(
   const query = rawQuery.trim().toLocaleLowerCase('en-GB')
   if (!query) return []
 
-  const matchRank = (name: string) => {
+  const matchRank = (name: string, email: string) => {
     const normalisedName = name.toLocaleLowerCase('en-GB')
+    const normalisedEmail = email.toLocaleLowerCase('en-GB')
     if (normalisedName === query) return 0
+    if (query.includes('@') && normalisedEmail === query) return 0
     if (normalisedName.startsWith(query)) return 1
     if (normalisedName.split(/\s+/).some((part) => part.startsWith(query))) return 2
-    if (normalisedName.includes(query)) return 3
+    if (normalisedName.includes(query) || (query.includes('@') && normalisedEmail.includes(query))) return 3
     return null
   }
 
   return listAttendees(state)
-    .map((attendee, index) => ({ attendee, index, rank: matchRank(attendee.name) }))
+    .map((attendee, index) => ({ attendee, index, rank: matchRank(attendee.name, attendee.email) }))
     .filter((match): match is typeof match & { rank: number } => match.rank !== null)
     .sort((left, right) => left.rank - right.rank || left.index - right.index)
     .map(({ attendee }) => attendee)

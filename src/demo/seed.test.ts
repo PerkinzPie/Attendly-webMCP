@@ -27,8 +27,9 @@ describe('deterministic event-operations seed', () => {
     }))
   })
 
-  it('includes grouped registration, assistance, and near-capacity examples', () => {
+  it('includes grouped registration, assistance, capacity, and duplicate-candidate examples', () => {
     const seed = createDemoOperationsSeed()
+    const duplicateCandidates = seed.attendees.filter((attendee) => attendee.email === 'sarah.jenkins@example.test')
 
     expect(seed.registrationGroups.some((group) => group.attendeeIds.length > 1)).toBe(true)
     expect(seed.attendees).toContainEqual(expect.objectContaining({
@@ -42,6 +43,8 @@ describe('deterministic event-operations seed', () => {
       remainingPlaces: 4,
       warningThreshold: 4,
     }))
+    expect(duplicateCandidates.map((attendee) => attendee.name)).toEqual(['Sarah Jenkins', 'Priya Shah'])
+    expect(new Set(duplicateCandidates.map((attendee) => attendee.registrationGroupId)).size).toBe(2)
   })
 
   it('uses only explicitly synthetic identities and contact details', () => {

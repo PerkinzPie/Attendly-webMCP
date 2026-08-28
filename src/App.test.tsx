@@ -192,6 +192,32 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('No attendees found.')).toBeInTheDocument()
   })
 
+  it('shows anomaly evidence and opens the relevant registrations', () => {
+    render(<App operationsService={createTestOperationsService()} />)
+    openManagedEvent()
+
+    const issues = screen.getByRole('region', { name: 'Needs attention' })
+    expect(within(issues).getByText('2 issues')).toBeInTheDocument()
+    expect(within(issues).getByRole('heading', { name: '4 booking places remaining' })).toBeInTheDocument()
+    expect(within(issues).getByText('13 checked in · 16 registered · 20 capacity')).toBeInTheDocument()
+    expect(within(issues).queryByText('Over capacity')).not.toBeInTheDocument()
+    expect(within(issues).getByRole('heading', { name: 'Possible duplicate registrations' })).toBeInTheDocument()
+    expect(within(issues).getByText('sarah.jenkins@example.test')).toBeInTheDocument()
+    expect(within(issues).getByText('Sarah Jenkins')).toBeInTheDocument()
+    expect(within(issues).getByText('RIV-001')).toBeInTheDocument()
+    expect(within(issues).getByText('Priya Shah')).toBeInTheDocument()
+    expect(within(issues).getByText('RIV-014')).toBeInTheDocument()
+
+    fireEvent.click(within(issues).getByRole('button', { name: 'Review registrations' }))
+
+    const search = screen.getByPlaceholderText('Search attendees')
+    expect(search).toHaveValue('sarah.jenkins@example.test')
+    expect(search).toHaveFocus()
+    expect(screen.getByText('2 matches')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Priya Shah' })).toBeInTheDocument()
+  })
+
   it('checks in a selected attendee only after explicit confirmation', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)
@@ -358,6 +384,38 @@ describe('Attendly organisation directory', () => {
 
     expect(screen.getByText('Stale')).toBeInTheDocument()
     expect(refresh).not.toBeDisabled()
+  })
+
+  it('clears stale anomaly warnings when a refreshed snapshot has none', async () => {
+    const baseService = createTestOperationsService()
+    const initialResult = baseService.getSnapshot()
+    if (!initialResult.ok) throw new Error('Expected initial snapshot')
+    const resolvedResult = {
+      ok: true as const,
+      data: { ...initialResult.data, anomalies: [] },
+    }
+    const service: EventOperationsService = {
+      ...baseService,
+      getSnapshot: vi.fn()
+        .mockReturnValueOnce(initialResult)
+        .mockReturnValueOnce(resolvedResult),
+    }
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0)
+      return 1
+    })
+    render(<App operationsService={service} />)
+    openManagedEvent()
+    expect(screen.getByRole('heading', { name: '4 booking places remaining' })).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh live data' }))
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByRole('heading', { name: '4 booking places remaining' })).not.toBeInTheDocument()
+    expect(screen.getByText('No issues detected.')).toBeInTheDocument()
+    expect(screen.getByText('0 issues')).toBeInTheDocument()
   })
 
   it('does not reset persisted state before confirmation and supports cancellation', () => {

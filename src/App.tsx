@@ -85,17 +85,18 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   )
 }
 
-function SearchField({ label, placeholder, value, onChange }: {
+function SearchField({ label, placeholder, value, onChange, inputRef }: {
   label: string
   placeholder: string
   value: string
   onChange: (value: string) => void
+  inputRef?: RefObject<HTMLInputElement | null>
 }) {
   return (
     <label className="search-field">
       <span className="sr-only">{label}</span>
       <Icon name="search" size={20} />
-      <input type="search" placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input ref={inputRef} type="search" placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   )
 }
@@ -559,6 +560,7 @@ function OperationsWorkspace({
   const [expandedAttendeeId, setExpandedAttendeeId] = useState<string | null>(null)
   const [checkInReview, setCheckInReview] = useState<AttendeeCheckInReview | null>(null)
   const [checkInFeedback, setCheckInFeedback] = useState<{ type: 'error' | 'success', message: string } | null>(null)
+  const attendeeSearchRef = useRef<HTMLInputElement>(null)
   const accountabilityLabel = snapshot?.activeAccountability
     ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
     : 'Not started'
@@ -572,11 +574,22 @@ function OperationsWorkspace({
   const attendeeCountLabel = `${attendeeResults.length} ${trimmedAttendeeQuery
     ? attendeeResults.length === 1 ? 'match' : 'matches'
     : attendeeResults.length === 1 ? 'attendee' : 'attendees'}`
+  const anomalies = snapshot?.anomalies ?? []
 
   const updateAttendeeQuery = (query: string) => {
     setAttendeeQuery(query)
     setCheckInReview(null)
     setCheckInFeedback(null)
+  }
+
+  const reviewDuplicateRegistrations = (email: string) => {
+    updateAttendeeQuery(email)
+    attendeeSearchRef.current?.focus()
+  }
+
+  const reviewAttendees = () => {
+    updateAttendeeQuery('')
+    attendeeSearchRef.current?.focus()
   }
 
   const reviewCheckIn = (attendeeId: string) => {
@@ -655,6 +668,66 @@ function OperationsWorkspace({
               <div><dt>Capacity remaining</dt><dd>{snapshot.capacityRemaining}</dd></div>
             </dl>
 
+            <section className="event-anomalies" aria-labelledby="event-anomalies-title">
+              <div className="event-anomalies-heading">
+                <h2 id="event-anomalies-title">Needs attention</h2>
+                <span aria-live="polite">
+                  {anomalies.length} {anomalies.length === 1 ? 'issue' : 'issues'}
+                </span>
+              </div>
+
+              {anomalies.length === 0 ? (
+                <p className="event-anomalies-empty">No issues detected.</p>
+              ) : (
+                <ul className="event-anomaly-list">
+                  {anomalies.map((anomaly) => (
+                    <li key={anomaly.id}>
+                      {anomaly.kind === 'duplicate-registration-candidate' ? (
+                        <article className="event-anomaly">
+                          <div>
+                            <h3>Possible duplicate registrations</h3>
+                            <p>{anomaly.reason}</p>
+                            <span className="event-anomaly-evidence">{anomaly.matchingEmail}</span>
+                            <ul className="duplicate-candidates">
+                              {anomaly.candidates.map((candidate) => (
+                                <li key={candidate.attendeeId}>
+                                  <span>{candidate.attendeeName}</span>
+                                  <span>{candidate.registrationReference}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          <button
+                            className="text-action"
+                            type="button"
+                            onClick={() => reviewDuplicateRegistrations(anomaly.matchingEmail)}
+                          >
+                            Review registrations <Icon name="arrow" />
+                          </button>
+                        </article>
+                      ) : (
+                        <article className={`event-anomaly ${anomaly.severity}`}>
+                          <div>
+                            <h3>{anomaly.kind === 'over-capacity' ? 'Over booking capacity' : `${anomaly.remainingPlaces} booking places remaining`}</h3>
+                            <p>
+                              {anomaly.currentOccupancy} checked in · {anomaly.registeredAttendees} registered · {anomaly.capacity} capacity
+                            </p>
+                          </div>
+                          <button
+                            className="text-action"
+                            type="button"
+                            onClick={reviewAttendees}
+                          >
+                            Review attendees <Icon name="arrow" />
+                          </button>
+                        </article>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
             <section className="attendee-lookup" aria-labelledby="attendee-lookup-title">
               <div className="attendee-lookup-heading">
                 <h2 id="attendee-lookup-title">Attendees</h2>
@@ -667,6 +740,7 @@ function OperationsWorkspace({
                 placeholder="Search attendees"
                 value={attendeeQuery}
                 onChange={updateAttendeeQuery}
+                inputRef={attendeeSearchRef}
               />
 
               {!attendeeListResult.ok ? (

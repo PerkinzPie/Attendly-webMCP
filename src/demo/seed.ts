@@ -437,7 +437,7 @@ const operationsAttendees: readonly DemoAttendee[] = [
   },
   {
     id: 'att_priya_shah', eventId: operationsEvent.id, registrationGroupId: 'reg_priya_shah',
-    name: 'Priya Shah', email: 'priya.shah@example.test', isSynthetic: true,
+    name: 'Priya Shah', email: 'sarah.jenkins@example.test', isSynthetic: true,
   },
 ]
 
@@ -572,6 +572,7 @@ export function createDemoEventOperationsState(): EventOperationsState {
       eventId: attendee.eventId,
       registrationGroupId: attendee.registrationGroupId,
       name: attendee.name,
+      email: attendee.email,
       ...(attendee.assistanceRequirement ? { assistanceRequirement: attendee.assistanceRequirement } : {}),
       isSynthetic: true,
     })),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoEventOperationsState } from '../demo/seed'
 import {
+  calculateAttendanceAnomalies,
   confirmEventDraft,
   createEventOperationsState,
   getAccountabilitySnapshot,
@@ -66,6 +67,67 @@ describe('event operations domain', () => {
       overCapacityBy: 1,
       capacityStatus: 'over-capacity',
     })
+  })
+
+  it('calculates near-capacity and duplicate-registration evidence without changing records', () => {
+    const state = createDemoEventOperationsState()
+    const before = JSON.stringify(state)
+
+    const anomalies = calculateAttendanceAnomalies(state)
+
+    expect(anomalies).toHaveLength(2)
+    expect(anomalies[0]).toEqual({
+      id: 'anomaly:evt_riverside_community_workshop:near-capacity',
+      eventId: 'evt_riverside_community_workshop',
+      kind: 'near-capacity',
+      severity: 'warning',
+      currentOccupancy: 13,
+      registeredAttendees: 16,
+      capacity: 20,
+      remainingPlaces: 4,
+      overCapacityBy: 0,
+      warningThreshold: 4,
+    })
+    expect(anomalies[1]).toMatchObject({
+      kind: 'duplicate-registration-candidate',
+      reason: 'The same email address appears on separate registrations.',
+      matchingEmail: 'sarah.jenkins@example.test',
+      candidates: [
+        { attendeeId: 'att_sarah_jenkins', registrationReference: 'RIV-001' },
+        { attendeeId: 'att_priya_shah', registrationReference: 'RIV-014' },
+      ],
+    })
+    expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('reports over-capacity only when registrations exceed capacity', () => {
+    const state = createDemoEventOperationsState()
+    const anomalies = calculateAttendanceAnomalies(createEventOperationsState({
+      ...state,
+      event: { ...state.event, capacity: 15 },
+    }))
+
+    expect(anomalies[0]).toMatchObject({
+      kind: 'over-capacity',
+      capacity: 15,
+      registeredAttendees: 16,
+      remainingPlaces: 0,
+      overCapacityBy: 1,
+    })
+  })
+
+  it('returns an explicit empty anomaly result when all conditions are resolved', () => {
+    const state = createDemoEventOperationsState()
+    const resolved = createEventOperationsState({
+      ...state,
+      event: { ...state.event, capacity: 30 },
+      attendees: state.attendees.map((attendee) => ({
+        ...attendee,
+        email: `${attendee.id}@example.test`,
+      })),
+    })
+
+    expect(calculateAttendanceAnomalies(resolved)).toEqual([])
   })
 
   it('reports the latest operational update time', () => {

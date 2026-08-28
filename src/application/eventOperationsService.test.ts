@@ -104,6 +104,42 @@ describe('event operations application service', () => {
       capacityRemaining: 7,
       overCapacityBy: 0,
       capacityStatus: 'available',
+      anomalies: [
+        {
+          id: 'anomaly:evt_riverside_community_workshop:near-capacity',
+          eventId: 'evt_riverside_community_workshop',
+          kind: 'near-capacity',
+          severity: 'warning',
+          currentOccupancy: 13,
+          registeredAttendees: 16,
+          capacity: 20,
+          remainingPlaces: 4,
+          overCapacityBy: 0,
+          warningThreshold: 4,
+        },
+        {
+          id: 'anomaly:evt_riverside_community_workshop:duplicate-registration:att_sarah_jenkins:att_priya_shah',
+          eventId: 'evt_riverside_community_workshop',
+          kind: 'duplicate-registration-candidate',
+          severity: 'warning',
+          reason: 'The same email address appears on separate registrations.',
+          matchingEmail: 'sarah.jenkins@example.test',
+          candidates: [
+            {
+              attendeeId: 'att_sarah_jenkins',
+              attendeeName: 'Sarah Jenkins',
+              registrationGroupId: 'reg_jenkins_family',
+              registrationReference: 'RIV-001',
+            },
+            {
+              attendeeId: 'att_priya_shah',
+              attendeeName: 'Priya Shah',
+              registrationGroupId: 'reg_priya_shah',
+              registrationReference: 'RIV-014',
+            },
+          ],
+        },
+      ],
       activeAccountability: null,
       createdEvents: [],
     })
@@ -439,7 +475,11 @@ describe('event operations application service', () => {
     }).ok).toBe(true)
 
     const stored = JSON.parse(memory.storage.getItem('test:event-operations') ?? '') as {
-      state: { event: Record<string, unknown>, createdEvents: Array<Record<string, unknown>> }
+      state: {
+        event: Record<string, unknown>
+        createdEvents: Array<Record<string, unknown>>
+        attendees: Array<Record<string, unknown>>
+      }
     }
     delete stored.state.event.startsAt
     delete stored.state.event.organisationId
@@ -454,6 +494,7 @@ describe('event operations application service', () => {
       createdBy: organiser,
       isSynthetic: true,
     }]
+    stored.state.attendees.forEach((attendee) => delete attendee.email)
     memory.storage.setItem('test:event-operations', JSON.stringify(stored))
 
     const reloaded = createService(createStore(memory.storage)).getSnapshot()
@@ -470,6 +511,8 @@ describe('event operations application service', () => {
         createdEvents: [{ id: 'event_legacy', organisationId: 'org_lantern_rooms' }],
       },
     })
+    expect(createService(createStore(memory.storage)).searchAttendees('sarah.jenkins@example.test'))
+      .toMatchObject({ ok: true, data: [{ name: 'Sarah Jenkins' }, { name: 'Priya Shah' }] })
   })
 
   it('applies equivalent state changes for human and WebMCP callers through the same service API', () => {

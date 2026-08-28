@@ -1,4 +1,5 @@
 import {
+  calculateAttendanceAnomalies,
   checkInAttendee as applyCheckIn,
   confirmEventDraft as applyEventCreation,
   getAccountabilitySnapshot,
@@ -13,6 +14,7 @@ import {
   type AccountabilitySnapshot,
   type AccountabilityStatus,
   type ActivityEntry,
+  type AttendanceAnomaly,
   type AttendeeCheckInReview,
   type AttendeeSearchResult,
   type CreatedEvent,
@@ -75,6 +77,7 @@ export type EventOperationsServiceSnapshot = {
   readonly capacityRemaining: number
   readonly overCapacityBy: number
   readonly capacityStatus: 'available' | 'near-capacity' | 'over-capacity'
+  readonly anomalies: readonly AttendanceAnomaly[]
   readonly activeAccountability: AccountabilitySnapshot | null
   readonly createdEvents: readonly CreatedEvent[]
 }
@@ -224,6 +227,7 @@ function reject(detail: EventOperationsServiceError): never {
 
 function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsServiceSnapshot {
   const eventSnapshot = getEventSnapshot(persisted.state)
+  const anomalies = calculateAttendanceAnomalies(persisted.state)
 
   return {
     revision: persisted.revision,
@@ -242,6 +246,9 @@ function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsSe
     capacityRemaining: eventSnapshot.capacityRemaining,
     overCapacityBy: eventSnapshot.overCapacityBy,
     capacityStatus: eventSnapshot.capacityStatus,
+    anomalies: anomalies.map((anomaly) => anomaly.kind === 'duplicate-registration-candidate'
+      ? { ...anomaly, candidates: anomaly.candidates.map((candidate) => ({ ...candidate })) }
+      : { ...anomaly }),
     activeAccountability: getAccountabilitySnapshot(persisted.state),
     createdEvents: persisted.state.createdEvents.map((event) => ({
       ...event,
