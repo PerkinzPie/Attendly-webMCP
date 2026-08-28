@@ -287,6 +287,33 @@ describe('event operations application service', () => {
     expect(store.read().state.createdEvents).toHaveLength(1)
   })
 
+  it('attributes agent-confirmed event creation to the site tool', () => {
+    const memory = createMemoryStorage()
+    const service = createService(createStore(memory.storage))
+    const draft = service.prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
+      name: 'Family Games Night',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Main Hall',
+      capacity: 40,
+    })
+
+    expect(draft.ok).toBe(true)
+    if (!draft.ok) throw new Error('Expected event draft to succeed')
+    const result = service.confirmEventDraft({ draft: draft.data, actor: agent })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        activityEntry: {
+          action: 'event-created',
+          actor: { channel: 'webmcp' },
+          toolName: 'confirm_event_creation',
+        },
+      },
+    })
+  })
+
   it('keeps invalid and cancelled event drafts out of persisted state', () => {
     const memory = createMemoryStorage()
     const store = createStore(memory.storage)

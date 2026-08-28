@@ -540,15 +540,10 @@
   border-bottom: 1px solid var(--border);
 }
 
-.event-context-id { margin: 9px 0 0; color: var(--text-subtle); font-size: 0.76rem; }
-.event-context-id code { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; overflow-wrap: anywhere; }
-
 .event-context-details { max-width: 720px; margin: 28px 0 0; }
 .event-context-details > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 20px; padding: 13px 0; border-bottom: 1px solid var(--border); }
 .event-context-details dt { color: var(--text-subtle); font-size: 0.78rem; }
 .event-context-details dd { margin: 0; color: var(--ink); font-size: 0.86rem; font-weight: 620; }
-.event-context-details code { color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; overflow-wrap: anywhere; }
-
 .event-not-found .section-inner { max-width: 720px; }
 .event-not-found p { margin: 16px 0 24px; color: var(--text-subtle); line-height: 1.6; }
 .event-not-found code { color: var(--ink); overflow-wrap: anywhere; }

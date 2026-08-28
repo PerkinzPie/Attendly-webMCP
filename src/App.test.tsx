@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { createEventOperationsService, type EventOperationsService } from './application/eventOperationsService'
 import { createPersistentEventOperationsStore } from './application/eventOperationsStore'
 import { createDemoEventOperationsState, demoOrganisations } from './demo/seed'
 import type { OperationsActor } from './domain/eventOperations'
+import type { WebMcpTool } from './webmcp/eventPreparationTools'
 
 const organiser: OperationsActor = {
   id: 'actor_shell_test',
@@ -52,6 +53,20 @@ function createTestOperationsService(): EventOperationsService {
   return createTestOperationsHarness().service
 }
 
+function installModelContext() {
+  const tools = new Map<string, WebMcpTool>()
+  Object.defineProperty(document, 'modelContext', {
+    configurable: true,
+    value: {
+      async registerTool(tool: WebMcpTool, options?: { signal?: AbortSignal }) {
+        tools.set(tool.name, tool)
+        options?.signal?.addEventListener('abort', () => tools.delete(tool.name), { once: true })
+      },
+    },
+  })
+  return tools
+}
+
 function openOrganisation(name: string) {
   const heading = screen.getByRole('heading', { name })
   const row = heading.closest('article')
@@ -70,6 +85,7 @@ function openManagedEvent(name = 'Riverside Community Workshop') {
 afterEach(() => {
   vi.restoreAllMocks()
   window.history.replaceState(null, '', '/')
+  Object.defineProperty(document, 'modelContext', { configurable: true, value: undefined })
 })
 
 describe('Attendly organisation directory', () => {
@@ -130,6 +146,99 @@ describe('Attendly organisation directory', () => {
     expect(refresh).toHaveTextContent('')
     expect(refresh.querySelector('svg')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Browse public events' })).not.toBeInTheDocument()
+  })
+
+  it('exposes reviewable event preparation tools on the events page', async () => {
+    const service = createTestOperationsService()
+    const tools = installModelContext()
+    render(<App operationsService={service} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+
+    await waitFor(() => expect([...tools.keys()]).toEqual([
+      'list_events',
+      'create_event_draft',
+      'confirm_event_creation',
+    ]))
+
+    const listResult = await tools.get('list_events')?.execute({}) as {
+      structuredContent: { ok: boolean, events: Array<Record<string, unknown>> }
+    }
+    expect(tools.get('list_events')?.annotations).toMatchObject({ readOnlyHint: true })
+    expect(listResult.structuredContent.ok).toBe(true)
+    expect(listResult.structuredContent.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'evt_riverside_community_workshop',
+        name: 'Riverside Community Workshop',
+        capacity: 20,
+        state: 'Check-in open',
+      }),
+    ]))
+
+    let draftResult: {
+      structuredContent: {
+        ok: boolean
+        draft: { id: string }
+        warnings: Array<{ field: string, message: string }>
+        persisted: boolean
+      }
+    } | undefined
+    await act(async () => {
+      draftResult = await tools.get('create_event_draft')?.execute({
+        organisationId: 'org_lantern_rooms',
+        name: 'Family Games Night',
+        startsAt: '2026-10-10T18:30:00.000Z',
+        venue: 'Main Hall',
+        capacity: 8,
+      }) as typeof draftResult
+    })
+
+    expect(draftResult?.structuredContent).toMatchObject({
+      ok: true,
+      warnings: [{ field: 'capacity' }],
+      persisted: false,
+    })
+    expect(screen.getByRole('heading', { name: 'Review event' })).toBeInTheDocument()
+    expect(screen.getByText('Capacity is low; check it before creating the event.')).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirmTool = tools.get('confirm_event_creation')
+    const staleResult = await confirmTool?.execute({ draftId: 'draft_stale' }) as {
+      structuredContent: { error: { code: string } }
+    }
+    expect(staleResult.structuredContent.error.code).toBe('stale_event_draft')
+    expect(confirm).not.toHaveBeenCalled()
+
+    const draftId = draftResult?.structuredContent.draft.id ?? ''
+    const declinedResult = await confirmTool?.execute({ draftId }) as {
+      structuredContent: { error: { code: string } }
+    }
+    expect(declinedResult.structuredContent.error.code).toBe('confirmation_declined')
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
+
+    confirm.mockReturnValue(true)
+    await act(async () => {
+      await confirmTool?.execute({ draftId })
+    })
+
+    expect(confirm).toHaveBeenLastCalledWith('Create “Family Games Night” for The Lantern Rooms?')
+    expect(screen.getByRole('heading', { level: 2, name: 'Family Games Night' })).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({
+      ok: true,
+      data: { createdEvents: [{ name: 'Family Games Night', capacity: 8 }] },
+    })
+    const updatedListResult = await tools.get('list_events')?.execute({}) as {
+      structuredContent: { events: Array<{ name: string }> }
+    }
+    expect(updatedListResult.structuredContent.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Family Games Night' }),
+    ]))
+
+    const repeatedResult = await confirmTool?.execute({ draftId }) as {
+      structuredContent: { error: { code: string } }
+    }
+    expect(repeatedResult.structuredContent.error.code).toBe('stale_event_draft')
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [{ name: 'Family Games Night' }] } })
   })
 
   it('lists and filters events across organisations while preserving their context', () => {
@@ -324,7 +433,7 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(within(createdEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Family Games Night' })).toHaveFocus()
-    expect(screen.getByText('Event reference').parentElement).toHaveTextContent('event_2')
+    expect(screen.queryByText('event_2')).not.toBeInTheDocument()
     expect(screen.getByText('Friends of Westbrook PTA')).toBeInTheDocument()
     expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Main Hall')
     expect(window.location.pathname).toBe('/organisations/org_westbrook_pta/events/event_2')

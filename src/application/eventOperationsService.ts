@@ -404,8 +404,8 @@ export function createEventOperationsService(
             activityId,
             createdAt: occurredAt,
             actor: request.actor,
-            ...(toolName(request.actor, 'confirm_event_draft')
-              ? { toolName: 'confirm_event_draft' }
+            ...(toolName(request.actor, 'confirm_event_creation')
+              ? { toolName: 'confirm_event_creation' }
               : {}),
           })
           return {
@@ -435,7 +435,7 @@ export function createEventOperationsService(
           actor: request.actor,
           occurredAt,
           resultSummary: 'Event creation was not saved.',
-          ...(toolName(request.actor, 'confirm_event_draft') ? { toolName: 'confirm_event_draft' } : {}),
+          ...(toolName(request.actor, 'confirm_event_creation') ? { toolName: 'confirm_event_creation' } : {}),
         })
         return failure(error)
       }
