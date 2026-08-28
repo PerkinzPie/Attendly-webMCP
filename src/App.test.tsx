@@ -246,7 +246,7 @@ describe('Attendly organisation directory', () => {
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [{ name: 'Family Games Night' }] } })
   })
 
-  it('replaces event-list tools with the current event context and rejects stale execution', async () => {
+  it('replaces event-list tools with active event tools and rejects stale execution', async () => {
     const tools = installModelContext()
     render(<App operationsService={createTestOperationsService()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
@@ -262,12 +262,16 @@ describe('Attendly organisation directory', () => {
     expect(eventRow).not.toBeNull()
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
-    await waitFor(() => expect([...tools.keys()]).toEqual(['get_active_event_context']))
+    await waitFor(() => expect([...tools.keys()]).toEqual([
+      'get_event_snapshot',
+      'find_attendee',
+      'get_attendance_anomalies',
+    ]))
     await expect(staleListTool?.execute({})).rejects.toMatchObject({ name: 'AbortError' })
-    const result = await tools.get('get_active_event_context')?.execute({}) as {
+    const result = await tools.get('get_event_snapshot')?.execute({ eventId: 'evt_riverside_community_workshop' }) as {
       structuredContent: { event: { eventId: string, organisationId: string, organisationName: string, organisationLocation: string, venue: string } }
     }
-    expect(result.structuredContent.event).toEqual({
+    expect(result.structuredContent.event).toMatchObject({
       eventId: 'evt_riverside_community_workshop',
       organisationId: 'org_lantern_rooms',
       organisationName: 'The Old Market Rooms',
@@ -275,7 +279,7 @@ describe('Attendly organisation directory', () => {
       name: 'Riverside Community Workshop',
       venue: 'Riverside Community Hall',
     })
-    const staleEventContextTool = tools.get('get_active_event_context')
+    const staleEventSnapshotTool = tools.get('get_event_snapshot')
 
     fireEvent.click(screen.getByRole('button', { name: '← Events' }))
     await waitFor(() => expect([...tools.keys()]).toEqual([
@@ -289,7 +293,8 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(within(nextEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
     await waitFor(() => expect([...tools.keys()]).toEqual(['get_active_event_context']))
-    await expect(staleEventContextTool?.execute({})).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(staleEventSnapshotTool?.execute({ eventId: 'evt_riverside_community_workshop' }))
+      .rejects.toMatchObject({ name: 'AbortError' })
     const nextResult = await tools.get('get_active_event_context')?.execute({}) as {
       structuredContent: { event: { eventId: string, organisationId: string, organisationName: string, organisationLocation: string, name: string, venue: string } }
     }
@@ -301,6 +306,113 @@ describe('Attendly organisation directory', () => {
       name: 'Family Sports Taster Day',
       venue: 'Kingsmead Sports Ground',
     })
+  })
+
+  it('exposes grounded read-only snapshot, attendee and anomaly tools for the active control room', async () => {
+    const service = createTestOperationsService()
+    const tools = installModelContext()
+    render(<App operationsService={service} />)
+    openManagedEvent()
+
+    await waitFor(() => expect([...tools.keys()]).toEqual([
+      'get_event_snapshot',
+      'find_attendee',
+      'get_attendance_anomalies',
+    ]))
+    expect([...tools.values()].every((tool) => tool.annotations?.readOnlyHint)).toBe(true)
+    const before = service.getSnapshot()
+
+    const snapshotResult = await tools.get('get_event_snapshot')?.execute({
+      eventId: 'evt_riverside_community_workshop',
+    }) as {
+      structuredContent: {
+        event: { eventId: string, organisationLocation: string, venue: string }
+        snapshotAt: string
+        totals: Record<string, number>
+        accountability: { status: string, total: number, accountedFor: number, unconfirmed: number }
+      }
+    }
+    expect(snapshotResult.structuredContent).toMatchObject({
+      event: {
+        eventId: 'evt_riverside_community_workshop',
+        organisationLocation: 'Frome, Somerset',
+        venue: 'Riverside Community Hall',
+      },
+      snapshotAt: '2026-09-05T18:14:00+01:00',
+      totals: {
+        registered: 16,
+        checkedIn: 13,
+        notArrived: 3,
+        capacity: 20,
+        capacityRemaining: 7,
+        overCapacityBy: 0,
+      },
+      accountability: {
+        status: 'not-active',
+        total: 0,
+        accountedFor: 0,
+        unconfirmed: 0,
+      },
+    })
+
+    const attendeeResult = await tools.get('find_attendee')?.execute({
+      eventId: 'evt_riverside_community_workshop',
+      query: 'jenk',
+    }) as {
+      structuredContent: {
+        matches: Array<{ attendeeId: string, name: string, checkIn: { status: string } }>
+      }
+    }
+    expect(attendeeResult.structuredContent.matches).toEqual([
+      expect.objectContaining({
+        attendeeId: 'att_sarah_jenkins',
+        name: 'Sarah Jenkins',
+        checkIn: expect.objectContaining({ status: 'not-arrived' }),
+      }),
+      expect.objectContaining({
+        attendeeId: 'att_leo_jenkins',
+        name: 'Leo Jenkins',
+        checkIn: expect.objectContaining({ status: 'not-arrived' }),
+      }),
+    ])
+
+    const anomalyResult = await tools.get('get_attendance_anomalies')?.execute({
+      eventId: 'evt_riverside_community_workshop',
+    }) as {
+      structuredContent: {
+        anomalies: Array<{ type: string, severity: string, evidence: Record<string, unknown>, recordIds: Record<string, unknown> }>
+      }
+    }
+    expect(anomalyResult.structuredContent.anomalies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'near-capacity',
+        severity: 'warning',
+        evidence: expect.objectContaining({ registeredAttendees: 16, capacity: 20 }),
+        recordIds: { eventId: 'evt_riverside_community_workshop' },
+      }),
+      expect.objectContaining({
+        type: 'duplicate-registration-candidate',
+        severity: 'warning',
+        evidence: expect.objectContaining({ matchingEmail: 'sarah.jenkins@example.test' }),
+        recordIds: expect.objectContaining({
+          attendeeIds: ['att_sarah_jenkins', 'att_priya_shah'],
+          registrationGroupIds: ['reg_jenkins_family', 'reg_priya_shah'],
+        }),
+      }),
+    ]))
+
+    const wrongEventResult = await tools.get('get_event_snapshot')?.execute({ eventId: 'evt_family_sports' }) as {
+      structuredContent: { error: { code: string }, event?: unknown }
+    }
+    expect(wrongEventResult.structuredContent).toEqual({
+      ok: false,
+      error: {
+        code: 'wrong_event_context',
+        message: 'The requested event is not active on this page.',
+      },
+    })
+    expect(wrongEventResult.structuredContent.event).toBeUndefined()
+    expect(service.getSnapshot()).toEqual(before)
   })
 
   it('lists and filters events across organisations while preserving their context', () => {

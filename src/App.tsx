@@ -7,6 +7,7 @@ import type {
 } from './application/eventOperationsService'
 import type {
   ActivityEntry,
+  AttendanceAnomaly,
   AttendeeCheckInReview,
   AttendeeSearchResult,
   CreatedEvent,
@@ -33,6 +34,7 @@ import {
   webMcpCompatibilityGuidance,
 } from './webmcp/browserAdapter'
 import { createEventContextTools } from './webmcp/eventContextTools'
+import { createEventReadTools } from './webmcp/eventReadTools'
 
 type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
@@ -271,6 +273,41 @@ function webMcpError(code: string, message: string) {
     content: [{ type: 'text', text: message }],
     structuredContent: { ok: false, error: { code, message } },
     isError: true,
+  }
+}
+
+function toWebMcpAnomaly(anomaly: AttendanceAnomaly) {
+  if (anomaly.kind === 'duplicate-registration-candidate') {
+    return {
+      id: anomaly.id,
+      eventId: anomaly.eventId,
+      type: anomaly.kind,
+      severity: anomaly.severity,
+      evidence: {
+        reason: anomaly.reason,
+        matchingEmail: anomaly.matchingEmail,
+      },
+      recordIds: {
+        attendeeIds: anomaly.candidates.map((candidate) => candidate.attendeeId),
+        registrationGroupIds: anomaly.candidates.map((candidate) => candidate.registrationGroupId),
+      },
+    }
+  }
+
+  return {
+    id: anomaly.id,
+    eventId: anomaly.eventId,
+    type: anomaly.kind,
+    severity: anomaly.severity,
+    evidence: {
+      currentOccupancy: anomaly.currentOccupancy,
+      registeredAttendees: anomaly.registeredAttendees,
+      capacity: anomaly.capacity,
+      remainingPlaces: anomaly.remainingPlaces,
+      overCapacityBy: anomaly.overCapacityBy,
+      warningThreshold: anomaly.warningThreshold,
+    },
+    recordIds: { eventId: anomaly.eventId },
   }
 }
 
@@ -1022,6 +1059,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const operationsOrganisation = operationsOrganisationId
     ? organisationsById.get(operationsOrganisationId) ?? null
     : null
+  const snapshotEventId = operationsSnapshot?.event.id ?? null
+  const snapshotOrganisationId = operationsSnapshot?.event.organisationId ?? null
   const organisationEvents = useMemo(
     () => selectedOrganisationId ? getOrganisationEvents(selectedOrganisationId) : [],
     [selectedOrganisationId],
@@ -1205,6 +1244,34 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     if (surface !== 'events') return
 
     const isEventList = operationsOrganisationId === null && operationsEventId === null
+    const isEventControlRoom = snapshotEventId === operationsEventId
+      && snapshotOrganisationId === operationsOrganisationId
+    const readActiveSnapshot = (requestedEventId: string) => {
+      if (requestedEventId !== operationsEventId) {
+        return {
+          ok: false as const,
+          result: webMcpError('wrong_event_context', 'The requested event is not active on this page.'),
+        }
+      }
+
+      const snapshot = service.getSnapshot()
+      if (!snapshot.ok) {
+        return {
+          ok: false as const,
+          result: webMcpError(snapshot.error.code, snapshot.error.message),
+        }
+      }
+      if (
+        snapshot.data.event.id !== operationsEventId
+        || snapshot.data.event.organisationId !== operationsOrganisationId
+      ) {
+        return {
+          ok: false as const,
+          result: webMcpError('wrong_event_context', 'The active page does not match the event operations record.'),
+        }
+      }
+      return { ok: true as const, snapshot: snapshot.data }
+    }
     const tools = isEventList
       ? createEventPreparationTools({
           listEvents: () => {
@@ -1260,7 +1327,70 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             )
           },
         }, demoOrganisations.map((organisation) => organisation.id))
-      : createEventContextTools(() => {
+      : isEventControlRoom && operationsEventId
+        ? createEventReadTools(operationsEventId, {
+            getEventSnapshot: (eventId) => {
+              const active = readActiveSnapshot(eventId)
+              if (!active.ok) return active.result
+              const snapshot = active.snapshot
+              const organisation = organisationsById.get(snapshot.event.organisationId)
+              return webMcpResult(`${snapshot.event.name} snapshot read.`, {
+                ok: true,
+                event: {
+                  eventId: snapshot.event.id,
+                  organisationId: snapshot.event.organisationId,
+                  organisationName: organisation?.name ?? '',
+                  organisationLocation: organisation?.location ?? '',
+                  name: snapshot.event.name,
+                  startsAt: snapshot.event.startsAt,
+                  venue: snapshot.event.venue,
+                },
+                snapshotAt: snapshot.lastUpdatedAt,
+                revision: snapshot.revision,
+                totals: {
+                  registered: snapshot.registrationCount,
+                  checkedIn: snapshot.checkedInCount,
+                  notArrived: snapshot.notArrivedCount,
+                  capacity: snapshot.capacity,
+                  capacityRemaining: snapshot.capacityRemaining,
+                  overCapacityBy: snapshot.overCapacityBy,
+                },
+                capacityStatus: snapshot.capacityStatus,
+                accountability: snapshot.activeAccountability
+                  ? { status: 'active', ...snapshot.activeAccountability }
+                  : {
+                      status: 'not-active',
+                      total: 0,
+                      accountedFor: 0,
+                      unconfirmed: 0,
+                      exemptNotPresent: 0,
+                    },
+              })
+            },
+            findAttendee: (eventId, query) => {
+              const active = readActiveSnapshot(eventId)
+              if (!active.ok) return active.result
+              const result = service.searchAttendees(query)
+              if (!result.ok) return webMcpError(result.error.code, result.error.message)
+              return webMcpResult(`Found ${result.data.length} attendee matches.`, {
+                ok: true,
+                eventId,
+                query: query.trim(),
+                matches: result.data,
+              })
+            },
+            getAttendanceAnomalies: (eventId) => {
+              const active = readActiveSnapshot(eventId)
+              if (!active.ok) return active.result
+              const anomalies = active.snapshot.anomalies.map(toWebMcpAnomaly)
+              return webMcpResult(`Found ${anomalies.length} attendance anomalies.`, {
+                ok: true,
+                eventId,
+                anomalies,
+              })
+            },
+          })
+        : createEventContextTools(() => {
           const snapshot = service.getSnapshot()
           if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
           const event = getManagedEvents(snapshot.data).find((item) => (
@@ -1278,12 +1408,12 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               venue: event.venue,
             },
           })
-        })
+          })
 
     const registration = registerWebMcpTools(tools)
     void registration.ready.catch(() => undefined)
     return registration.unregister
-  }, [operationsEventId, operationsOrganisationId, service, surface])
+  }, [operationsEventId, operationsOrganisationId, service, snapshotEventId, snapshotOrganisationId, surface])
 
   const openEvent = (item: DemoEvent) => {
     setSelectedEvent(item)
