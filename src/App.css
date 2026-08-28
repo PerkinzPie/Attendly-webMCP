@@ -500,6 +500,35 @@
 
 .workspace-heading h1:focus { outline: none; }
 
+.snapshot-freshness {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-subtle);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.snapshot-freshness > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success-strong);
+  font-weight: 650;
+}
+
+.snapshot-freshness > span:first-child::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.snapshot-freshness.refreshing > span:first-child { color: var(--iris); }
+.snapshot-freshness.stale > span:first-child { color: var(--warning-strong); }
+.snapshot-freshness time { color: var(--ink); font-weight: 620; }
+
 .workspace-error {
   margin-top: 24px;
   padding: 14px 16px;
@@ -701,9 +730,12 @@
   margin-top: 28px;
   padding: 16px;
   border-radius: var(--radius-md);
-  color: var(--warning-strong);
-  background: var(--warning-subtle);
+  color: var(--ink);
+  background: var(--neutral-100);
 }
+
+.capacity-summary.near-capacity,
+.capacity-summary.over-capacity { color: var(--warning-strong); background: var(--warning-subtle); }
 
 .capacity-summary strong { font-size: 1rem; }
 .capacity-summary span { font-size: 0.78rem; text-align: right; }
@@ -844,6 +876,7 @@ footer { color: var(--neutral-0); background: var(--navy); }
 .button-primary:hover { background: var(--indigo); }
 .button-secondary { border-color: var(--border-strong); color: var(--ink); background: var(--surface); }
 .button-secondary:hover { background: var(--neutral-100); }
+.button:disabled { opacity: 0.55; cursor: wait; }
 .button-icon { width: 40px; padding: 0; }
 .button-wide { width: 100%; }
 
@@ -943,6 +976,7 @@ footer { color: var(--neutral-0); background: var(--navy); }
   .footer-inner { grid-template-columns: 1fr; }
   .operations-workspace { padding: 40px 0 64px; }
   .workspace-heading { flex-direction: column; gap: 18px; }
+  .snapshot-freshness { width: 100%; justify-content: space-between; }
   .workspace-totals { grid-template-columns: 1fr 1fr; }
   .workspace-totals > div { padding: 14px 18px; border-bottom: 1px solid var(--border); }
   .workspace-totals > div:first-child { padding-left: 0; }

@@ -2,7 +2,9 @@ import {
   checkInAttendee as applyCheckIn,
   confirmEventDraft as applyEventCreation,
   getAccountabilitySnapshot,
+  getEventLastUpdatedAt,
   getEventSnapshot,
+  listAttendees as getAttendees,
   prepareAttendeeCheckIn as buildAttendeeCheckInReview,
   prepareEventDraft as buildEventDraft,
   searchAttendees as findAttendees,
@@ -58,6 +60,7 @@ export type EventOperationsServiceResult<T> =
 
 export type EventOperationsServiceSnapshot = {
   readonly revision: number
+  readonly lastUpdatedAt: string | null
   readonly event: {
     readonly id: string
     readonly name: string
@@ -124,6 +127,7 @@ export type EventOperationsServiceOptions = {
 
 export type EventOperationsService = {
   getSnapshot(): EventOperationsServiceResult<EventOperationsServiceSnapshot>
+  listAttendees(): EventOperationsServiceResult<readonly AttendeeSearchResult[]>
   searchAttendees(query: string): EventOperationsServiceResult<readonly AttendeeSearchResult[]>
   prepareAttendeeCheckIn(request: PrepareAttendeeCheckInRequest): EventOperationsServiceResult<AttendeeCheckInReview>
   prepareEventDraft(input: EventDraftInput): EventOperationsServiceResult<EventDraft>
@@ -219,6 +223,7 @@ function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsSe
 
   return {
     revision: persisted.revision,
+    lastUpdatedAt: getEventLastUpdatedAt(persisted.state),
     event: {
       id: persisted.state.event.id,
       name: persisted.state.event.name,
@@ -276,6 +281,13 @@ export function createEventOperationsService(
     getSnapshot() {
       try {
         return { ok: true, data: toSnapshot(options.store.read()) }
+      } catch (error) {
+        return failure(error)
+      }
+    },
+    listAttendees() {
+      try {
+        return { ok: true, data: getAttendees(options.store.read().state) }
       } catch (error) {
         return failure(error)
       }

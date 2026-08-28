@@ -22,6 +22,7 @@ type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
 type OrganisationFilter = 'All organisations' | OrganisationType
 type EventFilter = 'All events' | EventCategory
 type AppSurface = 'directory' | 'operations'
+type SnapshotRefreshState = 'fresh' | 'refreshing' | 'stale'
 
 const demoUiActor = {
   id: 'actor_demo_demonstrator',
@@ -135,6 +136,14 @@ function formatEventDate(startsAt: string) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(startsAt))
+}
+
+function formatUpdatedTime(updatedAt: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/London',
+  }).format(new Date(updatedAt))
 }
 
 function EventCreationWorkspace({
@@ -330,10 +339,12 @@ function EventCreationWorkspace({
 
 function OperationsWorkspace({
   snapshot,
+  refreshState,
   error,
   headingRef,
   onRefresh,
   onBrowseEvents,
+  onListAttendees,
   onSearchAttendees,
   onPrepareAttendeeCheckIn,
   onCheckInAttendee,
@@ -341,10 +352,12 @@ function OperationsWorkspace({
   onConfirmEventDraft,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
+  refreshState: SnapshotRefreshState
   error: string | null
   headingRef: RefObject<HTMLHeadingElement | null>
-  onRefresh: () => void
+  onRefresh: () => Promise<void>
   onBrowseEvents: () => void
+  onListAttendees: EventOperationsService['listAttendees']
   onSearchAttendees: EventOperationsService['searchAttendees']
   onPrepareAttendeeCheckIn: EventOperationsService['prepareAttendeeCheckIn']
   onCheckInAttendee: EventOperationsService['checkInAttendee']
@@ -360,10 +373,15 @@ function OperationsWorkspace({
     ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
     : 'Not started'
   const trimmedAttendeeQuery = attendeeQuery.trim()
-  const attendeeSearchResult = trimmedAttendeeQuery ? onSearchAttendees(trimmedAttendeeQuery) : null
-  const attendeeResults: readonly AttendeeSearchResult[] = attendeeSearchResult?.ok
-    ? attendeeSearchResult.data
+  const attendeeListResult = trimmedAttendeeQuery
+    ? onSearchAttendees(trimmedAttendeeQuery)
+    : onListAttendees()
+  const attendeeResults: readonly AttendeeSearchResult[] = attendeeListResult.ok
+    ? attendeeListResult.data
     : []
+  const attendeeCountLabel = `${attendeeResults.length} ${trimmedAttendeeQuery
+    ? attendeeResults.length === 1 ? 'match' : 'matches'
+    : attendeeResults.length === 1 ? 'attendee' : 'attendees'}`
 
   const updateAttendeeQuery = (query: string) => {
     setAttendeeQuery(query)
@@ -414,6 +432,14 @@ function OperationsWorkspace({
             <p className="workspace-context">Event management</p>
             <h1 id="operations-title" ref={headingRef} tabIndex={-1}>Riverside Community Workshop</h1>
           </div>
+          {snapshot ? (
+            <div className={`snapshot-freshness ${refreshState}`} aria-live="polite">
+              <span>{refreshState === 'refreshing' ? 'Refreshing' : refreshState === 'stale' ? 'Stale' : 'Current'}</span>
+              {snapshot.lastUpdatedAt ? (
+                <span>Updated <time dateTime={snapshot.lastUpdatedAt}>{formatUpdatedTime(snapshot.lastUpdatedAt)}</time></span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {error ? <div className="workspace-error" role="alert">{error}</div> : null}
@@ -430,10 +456,8 @@ function OperationsWorkspace({
             <section className="attendee-lookup" aria-labelledby="attendee-lookup-title">
               <div className="attendee-lookup-heading">
                 <h2 id="attendee-lookup-title">Attendees</h2>
-                {attendeeSearchResult?.ok ? (
-                  <span aria-live="polite">
-                    {attendeeResults.length} {attendeeResults.length === 1 ? 'match' : 'matches'}
-                  </span>
+                {attendeeListResult.ok ? (
+                  <span aria-live="polite">{attendeeCountLabel}</span>
                 ) : null}
               </div>
               <SearchField
@@ -443,11 +467,11 @@ function OperationsWorkspace({
                 onChange={updateAttendeeQuery}
               />
 
-              {attendeeSearchResult && !attendeeSearchResult.ok ? (
+              {!attendeeListResult.ok ? (
                 <p className="attendee-search-message" role="alert">Attendees could not be loaded. Please try again.</p>
               ) : null}
 
-              {attendeeSearchResult?.ok && attendeeResults.length === 0 ? (
+              {attendeeListResult.ok && attendeeResults.length === 0 ? (
                 <p className="attendee-search-message">No attendees found.</p>
               ) : null}
 
@@ -547,9 +571,9 @@ function OperationsWorkspace({
                   </div>
                   <span className={`state-badge ${snapshot.capacityStatus}`}>{snapshot.capacityStatus.replace('-', ' ')}</span>
                 </div>
-                <div className="capacity-summary">
+                <div className={`capacity-summary ${snapshot.capacityStatus}`}>
                   <strong>{snapshot.capacityRemaining} places remain</strong>
-                  <span>{snapshot.registrationCount} of {snapshot.capacity} places registered</span>
+                  <span>{snapshot.checkedInCount} of {snapshot.capacity} checked in</span>
                 </div>
               </section>
 
@@ -564,7 +588,9 @@ function OperationsWorkspace({
                     type="button"
                     aria-label="Refresh live data"
                     title="Refresh live data"
-                    onClick={onRefresh}
+                    aria-busy={refreshState === 'refreshing'}
+                    disabled={refreshState === 'refreshing'}
+                    onClick={() => void onRefresh()}
                   >
                     <Icon name="refresh" />
                   </button>
@@ -604,6 +630,9 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     initialOperationsResult.ok ? null : `${initialOperationsResult.error.message} ${initialOperationsResult.error.remediation}`,
   )
   const [operationsAnnouncement, setOperationsAnnouncement] = useState('')
+  const [operationsRefreshState, setOperationsRefreshState] = useState<SnapshotRefreshState>(
+    initialOperationsResult.ok ? 'fresh' : 'stale',
+  )
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null)
   const [organisationQuery, setOrganisationQuery] = useState('')
   const [organisationFilter, setOrganisationFilter] = useState<OrganisationFilter>('All organisations')
@@ -657,6 +686,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     return service.subscribe((snapshot) => {
       setOperationsSnapshot(snapshot)
       setOperationsError(null)
+      setOperationsRefreshState('fresh')
       setOperationsAnnouncement(
         `${snapshot.event.name} updated. ${snapshot.checkedInCount} checked in, ${snapshot.notArrivedCount} not arrived.`,
       )
@@ -699,17 +729,21 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     })
   }
 
-  const refreshOperations = () => {
+  const refreshOperations = async () => {
+    setOperationsRefreshState('refreshing')
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     const result = service.getSnapshot()
     if (!result.ok) {
       const message = `${result.error.message} ${result.error.remediation}`
       setOperationsError(message)
       setOperationsAnnouncement(message)
+      setOperationsRefreshState('stale')
       return
     }
 
     setOperationsSnapshot(result.data)
     setOperationsError(null)
+    setOperationsRefreshState('fresh')
     setOperationsAnnouncement(
       `${result.data.event.name} refreshed. ${result.data.checkedInCount} checked in, ${result.data.notArrivedCount} not arrived.`,
     )
@@ -740,6 +774,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setBookingEmail('')
     setOperationsSnapshot(result.data)
     setOperationsError(null)
+    setOperationsRefreshState('fresh')
     setOperationsAnnouncement('Demo reset.')
     requestAnimationFrame(() => directoryHeadingRef.current?.focus())
   }
@@ -790,10 +825,12 @@ function App({ operationsService }: { operationsService?: EventOperationsService
         {surface === 'operations' ? (
           <OperationsWorkspace
             snapshot={operationsSnapshot}
+            refreshState={operationsRefreshState}
             error={operationsError}
             headingRef={operationsHeadingRef}
             onRefresh={refreshOperations}
             onBrowseEvents={showDirectory}
+            onListAttendees={service.listAttendees}
             onSearchAttendees={service.searchAttendees}
             onPrepareAttendeeCheckIn={service.prepareAttendeeCheckIn}
             onCheckInAttendee={service.checkInAttendee}

@@ -88,6 +88,7 @@ describe('event operations application service', () => {
 
     expect(result.data).toEqual({
       revision: 0,
+      lastUpdatedAt: '2026-09-05T18:14:00+01:00',
       event: {
         id: 'evt_riverside_community_workshop',
         name: 'Riverside Community Workshop',
@@ -96,9 +97,9 @@ describe('event operations application service', () => {
       checkedInCount: 13,
       notArrivedCount: 3,
       capacity: 20,
-      capacityRemaining: 4,
+      capacityRemaining: 7,
       overCapacityBy: 0,
-      capacityStatus: 'near-capacity',
+      capacityStatus: 'available',
       activeAccountability: null,
       createdEvents: [],
     })
@@ -120,6 +121,24 @@ describe('event operations application service', () => {
     expect(result.data.map((attendee) => attendee.name)).toEqual(['Sarah Jenkins', 'Leo Jenkins'])
     expect(JSON.stringify(store.read())).toBe(before)
     expect(notifications).toBe(0)
+  })
+
+  it('lists attendees that reconcile with the current snapshot', () => {
+    const memory = createMemoryStorage()
+    const service = createService(createStore(memory.storage))
+    const attendees = service.listAttendees()
+    const snapshot = service.getSnapshot()
+
+    expect(attendees.ok).toBe(true)
+    expect(snapshot.ok).toBe(true)
+    if (!attendees.ok || !snapshot.ok) throw new Error('Expected snapshot and attendees')
+
+    expect(attendees.data).toHaveLength(snapshot.data.registrationCount)
+    expect(attendees.data.filter((attendee) => attendee.checkIn.status === 'checked-in'))
+      .toHaveLength(snapshot.data.checkedInCount)
+    expect(attendees.data.filter((attendee) => attendee.checkIn.status === 'not-arrived'))
+      .toHaveLength(snapshot.data.notArrivedCount)
+    expect(snapshot.data.checkedInCount + snapshot.data.capacityRemaining).toBe(snapshot.data.capacity)
   })
 
   it('requires a specific attendee when preparing an ambiguous check-in', () => {
@@ -261,7 +280,13 @@ describe('event operations application service', () => {
     if (!result.ok) throw new Error('Expected check-in to succeed')
 
     const persisted = store.read()
-    expect(result.data.snapshot).toMatchObject({ revision: 1, checkedInCount: 14, notArrivedCount: 2 })
+    expect(result.data.snapshot).toMatchObject({
+      revision: 1,
+      lastUpdatedAt: '2026-09-05T18:20:00+01:00',
+      checkedInCount: 14,
+      notArrivedCount: 2,
+      capacityRemaining: 6,
+    })
     expect(result.data.activityEntry).toMatchObject({
       action: 'attendee-checked-in',
       targetId: 'att_sarah_jenkins',

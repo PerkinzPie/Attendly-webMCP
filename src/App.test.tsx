@@ -94,6 +94,14 @@ describe('Attendly organisation directory', () => {
     const totals = screen.getByLabelText('Current event totals')
     expect(within(totals).getByText('Registered').nextElementSibling).toHaveTextContent('16')
     expect(within(totals).getByText('Checked in').nextElementSibling).toHaveTextContent('13')
+    expect(within(totals).getByText('Not arrived').nextElementSibling).toHaveTextContent('3')
+    expect(within(totals).getByText('Capacity remaining').nextElementSibling).toHaveTextContent('7')
+    const attendees = screen.getByRole('region', { name: 'Attendees' })
+    expect(within(attendees).getByText('16 attendees')).toBeInTheDocument()
+    expect(within(attendees).getAllByRole('heading', { level: 3 })).toHaveLength(16)
+    expect(within(attendees).getAllByText('Checked in')).toHaveLength(13)
+    expect(within(attendees).getAllByText('Not arrived')).toHaveLength(3)
+    expect(screen.getByText('Current').parentElement).toHaveTextContent('Updated 18:14')
     const refresh = screen.getByRole('button', { name: 'Refresh live data' })
     expect(refresh).toHaveTextContent('')
     expect(refresh.querySelector('svg')).toBeInTheDocument()
@@ -225,6 +233,8 @@ describe('Attendly organisation directory', () => {
     const service = createTestOperationsService()
     render(<App operationsService={service} />)
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    const initialTotals = screen.getByLabelText('Current event totals')
+    expect(within(initialTotals).getByText('Capacity remaining').nextElementSibling).toHaveTextContent('7')
 
     act(() => {
       const result = service.checkInAttendee({
@@ -237,9 +247,53 @@ describe('Attendly organisation directory', () => {
 
     const totals = screen.getByLabelText('Current event totals')
     expect(within(totals).getByText('Checked in').nextElementSibling).toHaveTextContent('14')
-    expect(screen.getByRole('status')).toHaveTextContent(
+    expect(within(totals).getByText('Not arrived').nextElementSibling).toHaveTextContent('2')
+    expect(within(totals).getByText('Capacity remaining').nextElementSibling).toHaveTextContent('6')
+    expect(screen.getByText('Current').parentElement).toHaveTextContent('Updated 18:30')
+    expect(screen.getAllByRole('status')[0]).toHaveTextContent(
       'Riverside Community Workshop updated. 14 checked in, 2 not arrived.',
     )
+  })
+
+  it('shows refreshing and stale states when a snapshot refresh is unresolved or fails', async () => {
+    const baseService = createTestOperationsService()
+    const initialResult = baseService.getSnapshot()
+    const failedResult = {
+      ok: false as const,
+      error: {
+        code: 'persistence_failed' as const,
+        message: 'The event operation could not be saved.',
+        remediation: 'No changes were saved. Check browser storage and retry.',
+      },
+    }
+    const service: EventOperationsService = {
+      ...baseService,
+      getSnapshot: vi.fn()
+        .mockReturnValueOnce(initialResult)
+        .mockReturnValueOnce(failedResult),
+    }
+    let finishRefresh: FrameRequestCallback | null = null
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      finishRefresh = callback
+      return 1
+    })
+    render(<App operationsService={service} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+
+    const refresh = screen.getByRole('button', { name: 'Refresh live data' })
+    fireEvent.click(refresh)
+
+    expect(screen.getByText('Refreshing')).toBeInTheDocument()
+    expect(refresh).toBeDisabled()
+    expect(screen.getByText('Refreshing').parentElement).toHaveTextContent('Updated 18:14')
+
+    await act(async () => {
+      finishRefresh?.(0)
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText('Stale')).toBeInTheDocument()
+    expect(refresh).not.toBeDisabled()
   })
 
   it('does not reset persisted state before confirmation and supports cancellation', () => {

@@ -4,7 +4,9 @@ import {
   confirmEventDraft,
   createEventOperationsState,
   getAccountabilitySnapshot,
+  getEventLastUpdatedAt,
   getEventSnapshot,
+  listAttendees,
   prepareAttendeeCheckIn,
   recordAccountabilityStatus,
   prepareEventDraft,
@@ -37,7 +39,7 @@ function startSession() {
 }
 
 describe('event operations domain', () => {
-  it('calculates occupancy and near-capacity state from the underlying records', () => {
+  it('calculates reconcilable attendance and capacity totals from the underlying records', () => {
     const snapshot = getEventSnapshot(createDemoEventOperationsState())
 
     expect(snapshot).toEqual({
@@ -46,9 +48,9 @@ describe('event operations domain', () => {
       occupancy: 13,
       notArrived: 3,
       capacity: 20,
-      capacityRemaining: 4,
+      capacityRemaining: 7,
       overCapacityBy: 0,
-      capacityStatus: 'near-capacity',
+      capacityStatus: 'available',
     })
   })
 
@@ -61,9 +63,14 @@ describe('event operations domain', () => {
 
     expect(getEventSnapshot(overCapacityState)).toMatchObject({
       capacityRemaining: 0,
-      overCapacityBy: 4,
+      overCapacityBy: 1,
       capacityStatus: 'over-capacity',
     })
+  })
+
+  it('reports the latest operational update time', () => {
+    expect(getEventLastUpdatedAt(createDemoEventOperationsState()))
+      .toBe('2026-09-05T18:14:00+01:00')
   })
 
   it('rejects contradictory check-in records for the same attendee', () => {
@@ -93,6 +100,19 @@ describe('event operations domain', () => {
       { attendeeId: 'att_sarah_jenkins', name: 'Sarah Jenkins', checkInStatus: 'not-arrived' },
       { attendeeId: 'att_leo_jenkins', name: 'Leo Jenkins', checkInStatus: 'not-arrived' },
     ])
+  })
+
+  it('lists every attendee with totals that reconcile to the event snapshot', () => {
+    const state = createDemoEventOperationsState()
+    const attendees = listAttendees(state)
+    const snapshot = getEventSnapshot(state)
+
+    expect(attendees).toHaveLength(snapshot.registeredAttendees)
+    expect(attendees.filter((attendee) => attendee.checkIn.status === 'checked-in'))
+      .toHaveLength(snapshot.occupancy)
+    expect(attendees.filter((attendee) => attendee.checkIn.status === 'not-arrived'))
+      .toHaveLength(snapshot.notArrived)
+    expect(snapshot.occupancy + snapshot.capacityRemaining).toBe(snapshot.capacity)
   })
 
   it('ranks partial attendee matches without changing event state', () => {

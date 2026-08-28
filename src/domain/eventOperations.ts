@@ -349,7 +349,7 @@ export function createEventOperationsState(input: EventOperationsStateInput): Ev
 export function getEventSnapshot(state: EventOperationsState): EventSnapshot {
   const registeredAttendees = state.attendees.length
   const occupancy = new Set(state.checkIns.map((checkIn) => checkIn.attendeeId)).size
-  const rawCapacityRemaining = state.event.capacity - registeredAttendees
+  const rawCapacityRemaining = state.event.capacity - occupancy
   const overCapacityBy = Math.max(0, -rawCapacityRemaining)
   const capacityRemaining = Math.max(0, rawCapacityRemaining)
   const capacityStatus = overCapacityBy > 0
@@ -368,6 +368,24 @@ export function getEventSnapshot(state: EventOperationsState): EventSnapshot {
     overCapacityBy,
     capacityStatus,
   }
+}
+
+export function getEventLastUpdatedAt(state: EventOperationsState): string | null {
+  const timestamps = [
+    ...state.checkIns.map((checkIn) => checkIn.checkedInAt),
+    ...state.activityEntries
+      .filter((entry) => entry.eventId === state.event.id)
+      .map((entry) => entry.occurredAt),
+    ...(state.accountabilitySession ? [
+      state.accountabilitySession.startedAt,
+      ...state.accountabilitySession.records.map((record) => record.updatedAt),
+    ] : []),
+  ]
+
+  return timestamps.reduce<string | null>((latest, timestamp) => {
+    if (!latest || Date.parse(timestamp) > Date.parse(latest)) return timestamp
+    return latest
+  }, null)
 }
 
 export function getAccountabilitySnapshot(state: EventOperationsState): AccountabilitySnapshot | null {
@@ -460,16 +478,46 @@ export function confirmEventDraft(
   return { state: nextState, event, activityEntry }
 }
 
+export function listAttendees(state: EventOperationsState): readonly AttendeeSearchResult[] {
+  const groupsById = new Map(state.registrationGroups.map((group) => [group.id, group]))
+  const attendeesById = new Map(state.attendees.map((attendee) => [attendee.id, attendee]))
+  const checkInsByAttendeeId = new Map(state.checkIns.map((checkIn) => [checkIn.attendeeId, checkIn]))
+
+  return state.attendees.map((attendee) => {
+    const group = groupsById.get(attendee.registrationGroupId)
+    invariant(group, `Attendee ${attendee.id} has no registration group`)
+    const checkIn = checkInsByAttendeeId.get(attendee.id)
+
+    return {
+      attendeeId: attendee.id,
+      name: attendee.name,
+      registrationGroup: {
+        id: group.id,
+        reference: group.reference,
+      },
+      checkIn: {
+        status: checkIn ? 'checked-in' : 'not-arrived',
+        checkedInAt: checkIn?.checkedInAt ?? null,
+      },
+      groupMembers: group.attendeeIds.map((attendeeId) => {
+        const member = attendeesById.get(attendeeId)
+        invariant(member, `Registration group ${group.id} contains an unknown attendee`)
+        return {
+          attendeeId: member.id,
+          name: member.name,
+          checkInStatus: checkInsByAttendeeId.has(member.id) ? 'checked-in' : 'not-arrived',
+        }
+      }),
+    }
+  })
+}
+
 export function searchAttendees(
   state: EventOperationsState,
   rawQuery: string,
 ): readonly AttendeeSearchResult[] {
   const query = rawQuery.trim().toLocaleLowerCase('en-GB')
   if (!query) return []
-
-  const groupsById = new Map(state.registrationGroups.map((group) => [group.id, group]))
-  const attendeesById = new Map(state.attendees.map((attendee) => [attendee.id, attendee]))
-  const checkInsByAttendeeId = new Map(state.checkIns.map((checkIn) => [checkIn.attendeeId, checkIn]))
 
   const matchRank = (name: string) => {
     const normalisedName = name.toLocaleLowerCase('en-GB')
@@ -480,37 +528,11 @@ export function searchAttendees(
     return null
   }
 
-  return state.attendees
+  return listAttendees(state)
     .map((attendee, index) => ({ attendee, index, rank: matchRank(attendee.name) }))
     .filter((match): match is typeof match & { rank: number } => match.rank !== null)
     .sort((left, right) => left.rank - right.rank || left.index - right.index)
-    .map(({ attendee }) => {
-      const group = groupsById.get(attendee.registrationGroupId)
-      invariant(group, `Attendee ${attendee.id} has no registration group`)
-      const checkIn = checkInsByAttendeeId.get(attendee.id)
-
-      return {
-        attendeeId: attendee.id,
-        name: attendee.name,
-        registrationGroup: {
-          id: group.id,
-          reference: group.reference,
-        },
-        checkIn: {
-          status: checkIn ? 'checked-in' : 'not-arrived',
-          checkedInAt: checkIn?.checkedInAt ?? null,
-        },
-        groupMembers: group.attendeeIds.map((attendeeId) => {
-          const member = attendeesById.get(attendeeId)
-          invariant(member, `Registration group ${group.id} contains an unknown attendee`)
-          return {
-            attendeeId: member.id,
-            name: member.name,
-            checkInStatus: checkInsByAttendeeId.has(member.id) ? 'checked-in' : 'not-arrived',
-          }
-        }),
-      }
-    })
+    .map(({ attendee }) => attendee)
 }
 
 export function prepareAttendeeCheckIn(
