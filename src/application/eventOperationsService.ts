@@ -63,6 +63,7 @@ export type EventOperationsServiceSnapshot = {
   readonly lastUpdatedAt: string | null
   readonly event: {
     readonly id: string
+    readonly organisationId: string
     readonly name: string
     readonly startsAt: string
     readonly capacity: number
@@ -125,6 +126,7 @@ export type EventOperationsServiceOptions = {
   readonly now: () => string
   readonly createId: (kind: 'check-in' | 'activity' | 'accountability-session' | 'event' | 'event-draft') => string
   readonly resetState: () => EventOperationsState
+  readonly authorisedOrganisationIds: readonly string[]
 }
 
 export type EventOperationsService = {
@@ -228,6 +230,7 @@ function toSnapshot(persisted: PersistedEventOperationsState): EventOperationsSe
     lastUpdatedAt: getEventLastUpdatedAt(persisted.state),
     event: {
       id: persisted.state.event.id,
+      organisationId: persisted.state.event.organisationId,
       name: persisted.state.event.name,
       startsAt: persisted.state.event.startsAt,
       capacity: persisted.state.event.capacity,
@@ -334,6 +337,7 @@ export function createEventOperationsService(
           data: buildEventDraft(input, {
             draftId: options.createId('event-draft'),
             preparedAt: options.now(),
+            authorisedOrganisationIds: options.authorisedOrganisationIds,
           }),
         }
       } catch (error) {
@@ -343,7 +347,10 @@ export function createEventOperationsService(
     confirmEventDraft(request) {
       try {
         requireAuthorised(options, request.actor, 'create-event')
-        if (request.draft.errors.length > 0) reject(errors.invalidEventDraft())
+        if (
+          request.draft.errors.length > 0
+          || !options.authorisedOrganisationIds.includes(request.draft.organisationId)
+        ) reject(errors.invalidEventDraft())
         const occurredAt = options.now()
         const updated = options.store.update((state) => {
           if (state.createdEvents.some((event) => event.sourceDraftId === request.draft.id)) {

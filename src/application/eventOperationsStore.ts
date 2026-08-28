@@ -77,18 +77,27 @@ function parsePersisted(raw: string, initialState: EventOperationsState): Persis
 
   const storedState = record.state as Record<string, unknown>
   const storedEvent = storedState.event
-  const migratedState = storedEvent
-    && typeof storedEvent === 'object'
-    && !('startsAt' in storedEvent)
-    && (storedEvent as Record<string, unknown>).id === initialState.event.id
+  const storedEventRecord = storedEvent && typeof storedEvent === 'object'
+    ? storedEvent as Record<string, unknown>
+    : null
+  const isSeedEvent = storedEventRecord?.id === initialState.event.id
+  const migratedEvent = storedEventRecord && isSeedEvent
     ? {
-        ...storedState,
-        event: {
-          ...(storedEvent as Record<string, unknown>),
-          startsAt: initialState.event.startsAt,
-        },
+        ...storedEventRecord,
+        ...(!('startsAt' in storedEventRecord) ? { startsAt: initialState.event.startsAt } : {}),
+        ...(!('organisationId' in storedEventRecord) ? { organisationId: initialState.event.organisationId } : {}),
       }
-    : storedState
+    : storedEvent
+  const migratedCreatedEvents = Array.isArray(storedState.createdEvents)
+    ? storedState.createdEvents.map((event) => event && typeof event === 'object' && !('organisationId' in event)
+      ? { ...event, organisationId: initialState.event.organisationId }
+      : event)
+    : storedState.createdEvents
+  const migratedState = {
+    ...storedState,
+    event: migratedEvent,
+    createdEvents: migratedCreatedEvents,
+  }
 
   return {
     schemaVersion: 1,

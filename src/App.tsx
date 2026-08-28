@@ -27,8 +27,11 @@ type SnapshotRefreshState = 'fresh' | 'refreshing' | 'stale'
 
 type AppRoute = {
   readonly surface: AppSurface
+  readonly organisationId: string | null
   readonly eventId: string | null
 }
+
+const organisationsById = new Map(demoOrganisations.map((organisation) => [organisation.id, organisation]))
 
 const demoUiActor = {
   id: 'actor_demo_demonstrator',
@@ -38,16 +41,24 @@ const demoUiActor = {
 } as const
 
 function readAppRoute(): AppRoute {
-  const eventMatch = /^\/events\/([^/]+)\/?$/.exec(window.location.pathname)
+  const eventMatch = /^\/organisations\/([^/]+)\/events\/([^/]+)\/?$/.exec(window.location.pathname)
   if (eventMatch) {
     try {
-      return { surface: 'events', eventId: decodeURIComponent(eventMatch[1]) }
+      return {
+        surface: 'events',
+        organisationId: decodeURIComponent(eventMatch[1]),
+        eventId: decodeURIComponent(eventMatch[2]),
+      }
     } catch {
-      return { surface: 'events', eventId: eventMatch[1] }
+      return { surface: 'events', organisationId: eventMatch[1], eventId: eventMatch[2] }
     }
   }
-  if (/^\/events\/?$/.test(window.location.pathname)) return { surface: 'events', eventId: null }
-  return { surface: 'directory', eventId: null }
+  const legacyEventMatch = /^\/events\/([^/]+)\/?$/.exec(window.location.pathname)
+  if (legacyEventMatch) return { surface: 'events', organisationId: null, eventId: legacyEventMatch[1] }
+  if (/^\/events\/?$/.test(window.location.pathname)) {
+    return { surface: 'events', organisationId: null, eventId: null }
+  }
+  return { surface: 'directory', organisationId: null, eventId: null }
 }
 
 function pushAppPath(path: string) {
@@ -170,14 +181,17 @@ function formatUpdatedTime(updatedAt: string) {
 }
 
 function EventCreationWorkspace({
+  organisations,
   onPrepareDraft,
   onConfirmDraft,
   onClose,
 }: {
+  organisations: readonly DemoOrganisation[]
   onPrepareDraft: EventOperationsService['prepareEventDraft']
   onConfirmDraft: EventOperationsService['confirmEventDraft']
   onClose: () => void
 }) {
+  const [organisationId, setOrganisationId] = useState('')
   const [name, setName] = useState('')
   const [startsAt, setStartsAt] = useState('')
   const [venue, setVenue] = useState('')
@@ -195,6 +209,7 @@ function EventCreationWorkspace({
   const prepareDraft = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const result = onPrepareDraft({
+      organisationId,
       name,
       startsAt,
       venue,
@@ -212,6 +227,7 @@ function EventCreationWorkspace({
 
   const cancelDraft = () => {
     setDraft(null)
+    setOrganisationId('')
     setName('')
     setStartsAt('')
     setVenue('')
@@ -230,6 +246,7 @@ function EventCreationWorkspace({
 
     setCreatedEventId(result.data.event.id)
     setDraft(null)
+    setOrganisationId('')
     setName('')
     setStartsAt('')
     setVenue('')
@@ -253,6 +270,7 @@ function EventCreationWorkspace({
         <div className="event-draft-review">
           <h3>Review event</h3>
           <dl>
+            <div><dt>Organisation</dt><dd>{organisationsById.get(draft.organisationId)?.name}</dd></div>
             <div><dt>Name</dt><dd>{draft.name}</dd></div>
             <div><dt>Date and time</dt><dd>{formatEventDate(draft.startsAt)}</dd></div>
             <div><dt>Venue</dt><dd>{draft.venue}</dd></div>
@@ -268,6 +286,24 @@ function EventCreationWorkspace({
         </div>
       ) : !createdEventId ? (
         <form className="event-creation-form" noValidate onSubmit={prepareDraft}>
+          <div className="event-form-field">
+            <label htmlFor="event-organisation">Organisation</label>
+            <select
+              id="event-organisation"
+              aria-invalid={Boolean(fieldError('organisationId'))}
+              aria-describedby={fieldError('organisationId') ? 'event-organisation-error' : undefined}
+              value={organisationId}
+              onChange={(event) => updateField(() => setOrganisationId(event.target.value))}
+            >
+              <option value="">Select organisation</option>
+              {organisations.map((organisation) => (
+                <option value={organisation.id} key={organisation.id}>{organisation.name}</option>
+              ))}
+            </select>
+            {fieldError('organisationId') ? (
+              <span className="field-error" id="event-organisation-error">{fieldError('organisationId')}</span>
+            ) : null}
+          </div>
           <div className="event-form-field">
             <label htmlFor="event-name">Event name</label>
             <input
@@ -338,36 +374,35 @@ function EventsWorkspace({
   snapshot: EventOperationsServiceSnapshot | null
   error: string | null
   headingRef: RefObject<HTMLHeadingElement | null>
-  onOpenEvent: (eventId: string) => void
+  onOpenEvent: (organisationId: string, eventId: string) => void
   onPrepareEventDraft: EventOperationsService['prepareEventDraft']
   onConfirmEventDraft: EventOperationsService['confirmEventDraft']
 }) {
   const [isCreatingEvent, setIsCreatingEvent] = useState(false)
-  const managedEvents = snapshot ? [
-    {
-      id: snapshot.event.id,
-      name: snapshot.event.name,
-      startsAt: snapshot.event.startsAt,
-      capacity: snapshot.event.capacity,
-      operationalState: snapshot.checkedInCount > 0 ? 'Check-in open' : 'Not started',
-    },
-    ...demoManagedEvents
-      .filter((event) => event.id !== snapshot.event.id)
-      .map((event) => ({
-        id: event.id,
-        name: event.name,
-        startsAt: event.startsAt,
-        capacity: event.capacity,
-        operationalState: 'Published',
-      })),
-    ...snapshot.createdEvents.map((event) => ({
+  const [organisationFilterId, setOrganisationFilterId] = useState('all')
+  const managedEvents = [
+    ...demoManagedEvents.map((event) => ({
       id: event.id,
+      organisationId: event.organisationId,
+      name: event.id === snapshot?.event.id ? snapshot.event.name : event.name,
+      startsAt: event.id === snapshot?.event.id ? snapshot.event.startsAt : event.startsAt,
+      capacity: event.id === snapshot?.event.id ? snapshot.event.capacity : event.capacity,
+      operationalState: event.id === snapshot?.event.id
+        ? snapshot.checkedInCount > 0 ? 'Check-in open' : 'Not started'
+        : 'Published',
+    })),
+    ...(snapshot?.createdEvents.map((event) => ({
+      id: event.id,
+      organisationId: event.organisationId,
       name: event.name,
       startsAt: event.startsAt,
       capacity: event.capacity,
       operationalState: 'Not started',
-    })),
-  ] : []
+    })) ?? []),
+  ].sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
+  const visibleManagedEvents = organisationFilterId === 'all'
+    ? managedEvents
+    : managedEvents.filter((event) => event.organisationId === organisationFilterId)
 
   return (
     <section className="managed-events-page" aria-labelledby="managed-events-title">
@@ -375,27 +410,40 @@ function EventsWorkspace({
         <div className="managed-events-heading">
           <div>
             <h1 id="managed-events-title" ref={headingRef} tabIndex={-1}>Events</h1>
-            <span>{managedEvents.length} {managedEvents.length === 1 ? 'event' : 'events'}</span>
+            <span>{visibleManagedEvents.length} {visibleManagedEvents.length === 1 ? 'event' : 'events'}</span>
           </div>
-          <button
-            className="button button-primary"
-            type="button"
-            aria-expanded={isCreatingEvent}
-            aria-controls="event-creation"
-            onClick={() => setIsCreatingEvent((current) => !current)}
-          >
-            Create event
-          </button>
+          <div className="managed-events-actions">
+            <select
+              aria-label="Filter events by organisation"
+              value={organisationFilterId}
+              onChange={(event) => setOrganisationFilterId(event.target.value)}
+            >
+              <option value="all">All organisations</option>
+              {demoOrganisations.map((organisation) => (
+                <option value={organisation.id} key={organisation.id}>{organisation.name}</option>
+              ))}
+            </select>
+            <button
+              className="button button-primary"
+              type="button"
+              aria-expanded={isCreatingEvent}
+              aria-controls="event-creation"
+              onClick={() => setIsCreatingEvent((current) => !current)}
+            >
+              Create event
+            </button>
+          </div>
         </div>
 
         {error ? <div className="workspace-error" role="alert">{error}</div> : null}
 
-        {managedEvents.length > 0 ? (
+        {visibleManagedEvents.length > 0 ? (
           <ul className="managed-event-list">
-            {managedEvents.map((event) => (
+            {visibleManagedEvents.map((event) => (
               <li key={event.id}>
                 <article className="managed-event-row">
                   <div>
+                    <p className="managed-event-organisation">{organisationsById.get(event.organisationId)?.name}</p>
                     <h2>{event.name}</h2>
                     <time dateTime={event.startsAt}>{formatEventDate(event.startsAt)}</time>
                   </div>
@@ -403,7 +451,11 @@ function EventsWorkspace({
                     <span><small>Capacity</small>{event.capacity}</span>
                     <span><small>Status</small>{event.operationalState}</span>
                   </div>
-                  <button className="text-action" type="button" onClick={() => onOpenEvent(event.id)}>
+                  <button
+                    className="text-action"
+                    type="button"
+                    onClick={() => onOpenEvent(event.organisationId, event.id)}
+                  >
                     Open <Icon name="arrow" />
                   </button>
                 </article>
@@ -414,6 +466,7 @@ function EventsWorkspace({
 
         {isCreatingEvent ? (
           <EventCreationWorkspace
+            organisations={demoOrganisations}
             onPrepareDraft={onPrepareEventDraft}
             onConfirmDraft={onConfirmEventDraft}
             onClose={() => setIsCreatingEvent(false)}
@@ -426,11 +479,13 @@ function EventsWorkspace({
 
 function EventOverviewWorkspace({
   event,
+  organisation,
   status,
   headingRef,
   onBack,
 }: {
   event: Pick<CreatedEvent, 'id' | 'name' | 'startsAt' | 'venue' | 'capacity'>
+  organisation: DemoOrganisation
   status: 'Not started' | 'Published'
   headingRef: RefObject<HTMLHeadingElement | null>
   onBack: () => void
@@ -441,12 +496,13 @@ function EventOverviewWorkspace({
         <button className="breadcrumb" type="button" onClick={onBack}>← Events</button>
         <div className="event-context-heading">
           <div>
+            <p className="workspace-context">{organisation.name}</p>
             <h1 id="created-event-title" ref={headingRef} tabIndex={-1}>{event.name}</h1>
-            <p className="event-context-id">Event ID <code>{event.id}</code></p>
           </div>
           <span className="state-badge">{status}</span>
         </div>
         <dl className="event-context-details">
+          <div><dt>Event reference</dt><dd><code>{event.id}</code></dd></div>
           <div><dt>Date and time</dt><dd>{formatEventDate(event.startsAt)}</dd></div>
           <div><dt>Venue</dt><dd>{event.venue}</dd></div>
           <div><dt>Capacity</dt><dd>{event.capacity}</dd></div>
@@ -457,11 +513,9 @@ function EventOverviewWorkspace({
 }
 
 function EventNotFound({
-  eventId,
   headingRef,
   onBack,
 }: {
-  eventId: string
   headingRef: RefObject<HTMLHeadingElement | null>
   onBack: () => void
 }) {
@@ -469,7 +523,7 @@ function EventNotFound({
     <section className="event-not-found" aria-labelledby="event-not-found-title">
       <div className="section-inner">
         <h1 id="event-not-found-title" ref={headingRef} tabIndex={-1}>Event not found</h1>
-        <p>No event exists with ID <code>{eventId}</code>.</p>
+        <p>This organisation or event is unavailable.</p>
         <button className="button button-primary" type="button" onClick={onBack}>Back to events</button>
       </div>
     </section>
@@ -478,6 +532,7 @@ function EventNotFound({
 
 function OperationsWorkspace({
   snapshot,
+  organisation,
   refreshState,
   error,
   headingRef,
@@ -489,6 +544,7 @@ function OperationsWorkspace({
   onCheckInAttendee,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
+  organisation: DemoOrganisation
   refreshState: SnapshotRefreshState
   error: string | null
   headingRef: RefObject<HTMLHeadingElement | null>
@@ -564,7 +620,7 @@ function OperationsWorkspace({
         <div className="workspace-heading">
           <div>
             <button className="breadcrumb" type="button" onClick={onBackToEvents}>← Events</button>
-            <p className="workspace-context">Event management</p>
+            <p className="workspace-context">{organisation.name}</p>
             <h1 id="operations-title" ref={headingRef} tabIndex={-1}>{snapshot?.event.name ?? 'Event'}</h1>
           </div>
           {snapshot ? (
@@ -743,6 +799,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const [initialOperationsResult] = useState(() => service.getSnapshot())
   const [initialRoute] = useState(readAppRoute)
   const [surface, setSurface] = useState<AppSurface>(initialRoute.surface)
+  const [operationsOrganisationId, setOperationsOrganisationId] = useState<string | null>(initialRoute.organisationId)
   const [operationsEventId, setOperationsEventId] = useState<string | null>(initialRoute.eventId)
   const [operationsSnapshot, setOperationsSnapshot] = useState<EventOperationsServiceSnapshot | null>(
     initialOperationsResult.ok ? initialOperationsResult.data : null,
@@ -770,9 +827,12 @@ function App({ operationsService }: { operationsService?: EventOperationsService
 
   const selectedOrganisation = demoOrganisations.find((item) => item.id === selectedOrganisationId) ?? null
   const createdEventContext = operationsSnapshot?.createdEvents
-    .find((event) => event.id === operationsEventId) ?? null
+    .find((event) => event.id === operationsEventId && event.organisationId === operationsOrganisationId) ?? null
   const publishedEventContext = demoManagedEvents
-    .find((event) => event.id === operationsEventId) ?? null
+    .find((event) => event.id === operationsEventId && event.organisationId === operationsOrganisationId) ?? null
+  const operationsOrganisation = operationsOrganisationId
+    ? organisationsById.get(operationsOrganisationId) ?? null
+    : null
   const organisationEvents = useMemo(
     () => selectedOrganisationId ? getOrganisationEvents(selectedOrganisationId) : [],
     [selectedOrganisationId],
@@ -822,6 +882,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     const applyRoute = () => {
       const route = readAppRoute()
       setSurface(route.surface)
+      setOperationsOrganisationId(route.organisationId)
       setOperationsEventId(route.eventId)
     }
     window.addEventListener('popstate', applyRoute)
@@ -830,7 +891,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
 
   useEffect(() => {
     if (surface === 'events') operationsHeadingRef.current?.focus()
-  }, [operationsEventId, surface])
+  }, [operationsEventId, operationsOrganisationId, surface])
 
   const scrollToTop = () => {
     const top = document.getElementById('main-content')
@@ -847,6 +908,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const showDirectory = () => {
     pushAppPath('/')
     setSurface('directory')
+    setOperationsOrganisationId(null)
     setOperationsEventId(null)
     setSelectedOrganisationId(null)
     requestAnimationFrame(scrollToTop)
@@ -856,13 +918,15 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     pushAppPath('/events')
     setSelectedEvent(null)
     setSurface('events')
+    setOperationsOrganisationId(null)
     setOperationsEventId(null)
     requestAnimationFrame(scrollToTop)
   }
 
-  const openOperationsEvent = (eventId: string) => {
-    pushAppPath(`/events/${encodeURIComponent(eventId)}`)
+  const openOperationsEvent = (organisationId: string, eventId: string) => {
+    pushAppPath(`/organisations/${encodeURIComponent(organisationId)}/events/${encodeURIComponent(eventId)}`)
     setSurface('events')
+    setOperationsOrganisationId(organisationId)
     setOperationsEventId(eventId)
     requestAnimationFrame(scrollToTop)
   }
@@ -870,6 +934,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const showHowItWorks = () => {
     pushAppPath('/')
     setSurface('directory')
+    setOperationsOrganisationId(null)
     setOperationsEventId(null)
     setSelectedOrganisationId(null)
     requestAnimationFrame(() => {
@@ -910,6 +975,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     }
 
     setSurface('directory')
+    setOperationsOrganisationId(null)
     setOperationsEventId(null)
     pushAppPath('/')
     setSelectedOrganisationId(null)
@@ -973,7 +1039,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
 
       <main id="main-content" tabIndex={-1}>
         {surface === 'events' ? (
-          operationsEventId === null ? (
+          operationsEventId === null && operationsOrganisationId === null ? (
             <EventsWorkspace
               snapshot={operationsSnapshot}
               error={operationsError}
@@ -982,9 +1048,12 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               onPrepareEventDraft={service.prepareEventDraft}
               onConfirmEventDraft={service.confirmEventDraft}
             />
-          ) : operationsSnapshot?.event.id === operationsEventId ? (
+          ) : operationsOrganisation
+            && operationsSnapshot?.event.id === operationsEventId
+            && operationsSnapshot.event.organisationId === operationsOrganisationId ? (
             <OperationsWorkspace
               snapshot={operationsSnapshot}
+              organisation={operationsOrganisation}
               refreshState={operationsRefreshState}
               error={operationsError}
               headingRef={operationsHeadingRef}
@@ -995,22 +1064,24 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               onPrepareAttendeeCheckIn={service.prepareAttendeeCheckIn}
               onCheckInAttendee={service.checkInAttendee}
             />
-          ) : createdEventContext ? (
+          ) : operationsOrganisation && createdEventContext ? (
             <EventOverviewWorkspace
               event={createdEventContext}
+              organisation={operationsOrganisation}
               status="Not started"
               headingRef={operationsHeadingRef}
               onBack={showEvents}
             />
-          ) : publishedEventContext ? (
+          ) : operationsOrganisation && publishedEventContext ? (
             <EventOverviewWorkspace
               event={publishedEventContext}
+              organisation={operationsOrganisation}
               status="Published"
               headingRef={operationsHeadingRef}
               onBack={showEvents}
             />
           ) : (
-            <EventNotFound eventId={operationsEventId} headingRef={operationsHeadingRef} onBack={showEvents} />
+            <EventNotFound headingRef={operationsHeadingRef} onBack={showEvents} />
           )
         ) : selectedOrganisation ? (
           <>

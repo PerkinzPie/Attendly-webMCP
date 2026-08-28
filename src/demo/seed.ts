@@ -350,7 +350,7 @@ const operationsEvent: DemoEvent = event({
 
 export const demoManagedEvents: readonly DemoEvent[] = [
   operationsEvent,
-  ...getOrganisationEvents(operationsEvent.organisationId),
+  ...demoEvents,
 ]
 
 const operationsAttendees: readonly DemoAttendee[] = [
@@ -554,6 +554,7 @@ export function createDemoEventOperationsState(): EventOperationsState {
   return createEventOperationsState({
     event: {
       id: seed.event.id,
+      organisationId: seed.event.organisationId,
       name: seed.event.name,
       startsAt: seed.event.startsAt,
       capacity: seed.event.capacity,

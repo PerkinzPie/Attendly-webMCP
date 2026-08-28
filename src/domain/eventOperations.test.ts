@@ -176,6 +176,7 @@ describe('event operations domain', () => {
     const before = JSON.stringify(state)
 
     const draft = prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
       name: '  Family   Games Night ',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: '  Main   Hall ',
@@ -183,10 +184,12 @@ describe('event operations domain', () => {
     }, {
       draftId: 'draft_family_games',
       preparedAt: '2026-09-01T10:00:00.000Z',
+      authorisedOrganisationIds: ['org_lantern_rooms'],
     })
 
     expect(draft).toMatchObject({
       id: 'draft_family_games',
+      organisationId: 'org_lantern_rooms',
       name: 'Family Games Night',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: 'Main Hall',
@@ -200,6 +203,7 @@ describe('event operations domain', () => {
   it('prevents an invalid event draft from being confirmed', () => {
     const state = createDemoEventOperationsState()
     const draft = prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
       name: 'Community Supper',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: 'Riverside Hall',
@@ -207,6 +211,7 @@ describe('event operations domain', () => {
     }, {
       draftId: 'draft_invalid_capacity',
       preparedAt: '2026-09-01T10:00:00.000Z',
+      authorisedOrganisationIds: ['org_lantern_rooms'],
     })
 
     expect(draft.errors).toEqual([
@@ -220,9 +225,28 @@ describe('event operations domain', () => {
     })).toThrow('Event draft contains validation errors')
   })
 
+  it('requires an explicitly authorised organisation for an event draft', () => {
+    const draft = prepareEventDraft({
+      organisationId: 'org_unknown',
+      name: 'Community Supper',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Riverside Hall',
+      capacity: 40,
+    }, {
+      draftId: 'draft_wrong_organisation',
+      preparedAt: '2026-09-01T10:00:00.000Z',
+      authorisedOrganisationIds: ['org_lantern_rooms'],
+    })
+
+    expect(draft.errors).toEqual([
+      { field: 'organisationId', message: 'Select an organisation you can manage.' },
+    ])
+  })
+
   it('confirms one event and records its creation activity', () => {
     const state = createDemoEventOperationsState()
     const draft = prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
       name: 'Community Supper',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: 'Riverside Hall',
@@ -230,6 +254,7 @@ describe('event operations domain', () => {
     }, {
       draftId: 'draft_community_supper',
       preparedAt: '2026-09-01T10:00:00.000Z',
+      authorisedOrganisationIds: ['org_lantern_rooms'],
     })
     const transition = confirmEventDraft(state, draft, {
       eventId: 'evt_community_supper',
@@ -242,6 +267,7 @@ describe('event operations domain', () => {
     expect(transition.state.createdEvents).toEqual([transition.event])
     expect(transition.event).toMatchObject({
       id: 'evt_community_supper',
+      organisationId: 'org_lantern_rooms',
       sourceDraftId: 'draft_community_supper',
       name: 'Community Supper',
       createdBy: organiser,

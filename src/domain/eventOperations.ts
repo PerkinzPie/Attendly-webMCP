@@ -7,6 +7,7 @@ export type OperationsActor = {
 
 export type EventRecord = {
   readonly id: string
+  readonly organisationId: string
   readonly name: string
   readonly startsAt: string
   readonly capacity: number
@@ -58,6 +59,7 @@ export type ActivityEntry = {
 export type CreatedEvent = {
   readonly id: string
   readonly sourceDraftId: string
+  readonly organisationId: string
   readonly name: string
   readonly startsAt: string
   readonly venue: string
@@ -68,12 +70,13 @@ export type CreatedEvent = {
 }
 
 export type EventDraftIssue = {
-  readonly field: 'name' | 'startsAt' | 'venue' | 'capacity'
+  readonly field: 'organisationId' | 'name' | 'startsAt' | 'venue' | 'capacity'
   readonly message: string
 }
 
 export type EventDraft = {
   readonly id: string
+  readonly organisationId: string
   readonly name: string
   readonly startsAt: string
   readonly venue: string
@@ -84,6 +87,7 @@ export type EventDraft = {
 }
 
 export type EventDraftInput = {
+  readonly organisationId: string
   readonly name: string
   readonly startsAt: string
   readonly venue: string
@@ -228,6 +232,7 @@ export type RecordAccountabilityCommand = {
 export type PrepareEventDraftCommand = {
   readonly draftId: string
   readonly preparedAt: string
+  readonly authorisedOrganisationIds: readonly string[]
 }
 
 export type ConfirmEventDraftCommand = {
@@ -250,6 +255,7 @@ function cloneActor(actor: OperationsActor): OperationsActor {
 }
 
 function validateState(state: EventOperationsState) {
+  invariant(state.event.organisationId.length > 0, 'Event organisation must be identified')
   invariant(state.event.capacity > 0, 'Event capacity must be greater than zero')
   invariant(!Number.isNaN(Date.parse(state.event.startsAt)), 'Event start time must be valid')
   invariant(state.capacityRule.warningThreshold >= 0, 'Capacity warning threshold cannot be negative')
@@ -291,6 +297,7 @@ function validateState(state: EventOperationsState) {
   const eventIds = new Set([state.event.id, ...state.createdEvents.map((event) => event.id)])
   const sourceDraftIds = new Set<string>()
   for (const event of state.createdEvents) {
+    invariant(event.organisationId.length > 0, `Created event ${event.id} must belong to an organisation`)
     invariant(event.name.length > 0, `Created event ${event.id} must have a name`)
     invariant(event.venue.length > 0, `Created event ${event.id} must have a venue`)
     invariant(!Number.isNaN(Date.parse(event.startsAt)), `Created event ${event.id} must have a valid start time`)
@@ -412,6 +419,7 @@ export function prepareEventDraft(
   input: EventDraftInput,
   command: PrepareEventDraftCommand,
 ): EventDraft {
+  const organisationId = input.organisationId.trim()
   const name = normaliseText(input.name)
   const venue = normaliseText(input.venue)
   const parsedStartsAt = new Date(input.startsAt)
@@ -419,6 +427,11 @@ export function prepareEventDraft(
   const errors: EventDraftIssue[] = []
   const warnings: EventDraftIssue[] = []
 
+  if (!organisationId) {
+    errors.push({ field: 'organisationId', message: 'Select an organisation.' })
+  } else if (!command.authorisedOrganisationIds.includes(organisationId)) {
+    errors.push({ field: 'organisationId', message: 'Select an organisation you can manage.' })
+  }
   if (!name) errors.push({ field: 'name', message: 'Enter an event name.' })
   if (!startsAt) errors.push({ field: 'startsAt', message: 'Enter a valid date and time.' })
   if (!venue) errors.push({ field: 'venue', message: 'Enter a venue.' })
@@ -430,6 +443,7 @@ export function prepareEventDraft(
 
   return {
     id: command.draftId,
+    organisationId,
     name,
     startsAt,
     venue,
@@ -454,6 +468,7 @@ export function confirmEventDraft(
   const event: CreatedEvent = {
     id: command.eventId,
     sourceDraftId: draft.id,
+    organisationId: draft.organisationId,
     name: draft.name,
     startsAt: draft.startsAt,
     venue: draft.venue,

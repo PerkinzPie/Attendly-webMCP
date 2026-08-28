@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { createEventOperationsService, type EventOperationsService } from './application/eventOperationsService'
 import { createPersistentEventOperationsStore } from './application/eventOperationsStore'
-import { createDemoEventOperationsState } from './demo/seed'
+import { createDemoEventOperationsState, demoOrganisations } from './demo/seed'
 import type { OperationsActor } from './domain/eventOperations'
 
 const organiser: OperationsActor = {
@@ -37,6 +37,7 @@ function createTestOperationsHarness() {
     now: () => '2026-09-05T18:30:00+01:00',
     createId: (kind) => `${kind}_${++sequence}`,
     resetState: createDemoEventOperationsState,
+    authorisedOrganisationIds: demoOrganisations.map((organisation) => organisation.id),
   })
 
   return {
@@ -108,10 +109,10 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Riverside Community Workshop' })).toHaveFocus()
-    expect(screen.getByText('Event management')).toBeInTheDocument()
+    expect(screen.getByText('The Lantern Rooms')).toBeInTheDocument()
     expect(screen.queryByText('Event ID')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Current workspace context')).toHaveTextContent('evt_riverside_community_workshop')
-    expect(window.location.pathname).toBe('/events/evt_riverside_community_workshop')
+    expect(window.location.pathname).toBe('/organisations/org_lantern_rooms/events/evt_riverside_community_workshop')
     expect(events).toHaveAttribute('aria-current', 'page')
     const totals = screen.getByLabelText('Current event totals')
     expect(within(totals).getByText('Registered').nextElementSibling).toHaveTextContent('16')
@@ -130,21 +131,30 @@ describe('Attendly organisation directory', () => {
     expect(screen.queryByRole('button', { name: 'Browse public events' })).not.toBeInTheDocument()
   })
 
-  it('lists the organiser’s published events without opening Riverside operations for them', () => {
+  it('lists and filters events across organisations while preserving their context', () => {
     render(<App operationsService={createTestOperationsService()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
 
-    expect(screen.getByText('4 events')).toBeInTheDocument()
-    const publishedEventRow = screen.getByRole('heading', { level: 2, name: 'Family Printmaking Workshop' }).closest('article')
+    expect(screen.getByText('19 events')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Friends of Westbrook PTA' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter events by organisation' }), {
+      target: { value: 'org_westbrook_pta' },
+    })
+
+    expect(screen.getByText('3 events')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Family Printmaking Workshop' })).not.toBeInTheDocument()
+    const publishedEventRow = screen.getByRole('heading', { level: 2, name: 'Year 6 Family Quiz Night' }).closest('article')
     expect(publishedEventRow).not.toBeNull()
+    expect(within(publishedEventRow as HTMLElement).getByText('Friends of Westbrook PTA')).toBeInTheDocument()
     expect(within(publishedEventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Published')
 
     fireEvent.click(within(publishedEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Family Printmaking Workshop' })).toHaveFocus()
-    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Studio One')
+    expect(screen.getByRole('heading', { level: 1, name: 'Year 6 Family Quiz Night' })).toHaveFocus()
+    expect(screen.getByText('Friends of Westbrook PTA')).toBeInTheDocument()
+    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Westbrook Main Hall')
     expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
-    expect(window.location.pathname).toBe('/events/evt_print_workshop')
+    expect(window.location.pathname).toBe('/organisations/org_westbrook_pta/events/evt_quiz_night')
   })
 
   it('finds attendees and expands their grouped registration', () => {
@@ -213,6 +223,7 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create event' }))
 
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org_lantern_rooms' } })
     fireEvent.change(screen.getByLabelText('Event name'), { target: { value: 'Community Supper' } })
     fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-10-10T18:30' } })
     fireEvent.change(screen.getByLabelText('Venue'), { target: { value: 'Riverside Hall' } })
@@ -241,6 +252,7 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create event' }))
 
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org_westbrook_pta' } })
     fireEvent.change(screen.getByLabelText('Event name'), { target: { value: '  Family   Games Night ' } })
     fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-10-10T18:30' } })
     fireEvent.change(screen.getByLabelText('Venue'), { target: { value: '  Main   Hall ' } })
@@ -250,6 +262,7 @@ describe('Attendly organisation directory', () => {
     const review = screen.getByRole('heading', { name: 'Review event' }).closest('div')
     expect(review).not.toBeNull()
     expect(within(review as HTMLElement).getByText('Family Games Night')).toBeInTheDocument()
+    expect(within(review as HTMLElement).getByText('Friends of Westbrook PTA')).toBeInTheDocument()
     expect(within(review as HTMLElement).getByText('Main Hall')).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { revision: 0, createdEvents: [] } })
 
@@ -258,7 +271,8 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('Event created.')).toBeInTheDocument()
     const createdEventRow = screen.getByRole('heading', { level: 2, name: 'Family Games Night' }).closest('article')
     expect(createdEventRow).not.toBeNull()
-    expect(screen.getByText('5 events')).toBeInTheDocument()
+    expect(screen.getByText('20 events')).toBeInTheDocument()
+    expect(within(createdEventRow as HTMLElement).getByText('Friends of Westbrook PTA')).toBeInTheDocument()
     expect(within(createdEventRow as HTMLElement).getByText('10 Oct 2026, 18:30')).toBeInTheDocument()
     expect(within(createdEventRow as HTMLElement).getByText('Capacity').parentElement).toHaveTextContent('40')
     expect(within(createdEventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Not started')
@@ -266,16 +280,17 @@ describe('Attendly organisation directory', () => {
       ok: true,
       data: {
         revision: 1,
-        createdEvents: [{ name: 'Family Games Night', venue: 'Main Hall', capacity: 40 }],
+        createdEvents: [{ organisationId: 'org_westbrook_pta', name: 'Family Games Night', venue: 'Main Hall', capacity: 40 }],
       },
     })
 
     fireEvent.click(within(createdEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Family Games Night' })).toHaveFocus()
-    expect(screen.getByText('Event ID').parentElement).toHaveTextContent('event_2')
+    expect(screen.getByText('Event reference').parentElement).toHaveTextContent('event_2')
+    expect(screen.getByText('Friends of Westbrook PTA')).toBeInTheDocument()
     expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Main Hall')
-    expect(window.location.pathname).toBe('/events/event_2')
+    expect(window.location.pathname).toBe('/organisations/org_westbrook_pta/events/event_2')
   })
 
   it('updates live totals and announces shared service changes without a page refresh', () => {
@@ -403,12 +418,12 @@ describe('Attendly organisation directory', () => {
   })
 
   it('recovers from a stale event link without selecting another event', () => {
-    window.history.replaceState(null, '', '/events/missing-event')
+    window.history.replaceState(null, '', '/organisations/missing-organisation/events/missing-event')
 
     render(<App operationsService={createTestOperationsService()} />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Event not found' })).toHaveFocus()
-    expect(screen.getByText('missing-event').parentElement).toHaveTextContent('No event exists with ID missing-event.')
+    expect(screen.getByText('This organisation or event is unavailable.')).toBeInTheDocument()
     expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Events' })).toHaveAttribute('aria-current', 'page')
 
@@ -416,6 +431,21 @@ describe('Attendly organisation directory', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Events' })).toHaveFocus()
     expect(window.location.pathname).toBe('/events')
+  })
+
+  it('does not open an event under a different organisation or a legacy unscoped route', () => {
+    window.history.replaceState(null, '', '/organisations/org_st_lukes/events/evt_autumn_fair')
+    const { unmount } = render(<App operationsService={createTestOperationsService()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Event not found' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Westbrook Autumn Fair' })).not.toBeInTheDocument()
+
+    unmount()
+    window.history.replaceState(null, '', '/events/evt_riverside_community_workshop')
+    render(<App operationsService={createTestOperationsService()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Event not found' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
   })
 
   it('searches organisation attributes and their event catalogue', () => {

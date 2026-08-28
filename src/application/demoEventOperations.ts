@@ -1,4 +1,4 @@
-import { createDemoEventOperationsState } from '../demo/seed'
+import { createDemoEventOperationsState, demoOrganisations } from '../demo/seed'
 import {
   createEventOperationsService,
   type EventOperationsService,
@@ -16,6 +16,7 @@ export function getDemoEventOperationsService(): EventOperationsService {
     now: () => new Date().toISOString(),
     createId: (kind) => `${kind}_${globalThis.crypto.randomUUID()}`,
     resetState: createDemoEventOperationsState,
+    authorisedOrganisationIds: demoOrganisations.map((organisation) => organisation.id),
   })
 
   return browserService

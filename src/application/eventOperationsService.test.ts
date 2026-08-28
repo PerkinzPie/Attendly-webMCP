@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDemoEventOperationsState } from '../demo/seed'
+import { createDemoEventOperationsState, demoOrganisations } from '../demo/seed'
 import type { OperationsActor } from '../domain/eventOperations'
 import {
   createEventOperationsService,
@@ -74,6 +74,7 @@ function createService(
       return `${kind}_${sequence}`
     },
     resetState: createDemoEventOperationsState,
+    authorisedOrganisationIds: demoOrganisations.map((organisation) => organisation.id),
   })
 }
 
@@ -91,6 +92,7 @@ describe('event operations application service', () => {
       lastUpdatedAt: '2026-09-05T18:14:00+01:00',
       event: {
         id: 'evt_riverside_community_workshop',
+        organisationId: 'org_lantern_rooms',
         name: 'Riverside Community Workshop',
         startsAt: '2026-09-05T18:30:00+01:00',
         capacity: 20,
@@ -202,6 +204,7 @@ describe('event operations application service', () => {
     service.subscribe((snapshot) => notifications.push(snapshot.revision))
 
     const draftResult = service.prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
       name: '  Family   Games Night ',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: '  Main Hall ',
@@ -211,6 +214,7 @@ describe('event operations application service', () => {
     expect(draftResult.ok).toBe(true)
     if (!draftResult.ok) throw new Error('Expected event draft to succeed')
     expect(draftResult.data).toMatchObject({
+      organisationId: 'org_lantern_rooms',
       name: 'Family Games Night',
       venue: 'Main Hall',
       errors: [],
@@ -226,6 +230,7 @@ describe('event operations application service', () => {
     expect(confirmed.data.snapshot).toMatchObject({ revision: 1 })
     expect(confirmed.data.snapshot.createdEvents).toHaveLength(1)
     expect(confirmed.data.event).toMatchObject({
+      organisationId: 'org_lantern_rooms',
       name: 'Family Games Night',
       venue: 'Main Hall',
       capacity: 8,
@@ -249,6 +254,7 @@ describe('event operations application service', () => {
     const store = createStore(memory.storage)
     const service = createService(store)
     const invalidDraft = service.prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
       name: 'Community Supper',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: 'Riverside Hall',
@@ -262,6 +268,27 @@ describe('event operations application service', () => {
     ])
     expect(service.confirmEventDraft({ draft: invalidDraft.data, actor: organiser }))
       .toMatchObject({ ok: false, error: { code: 'invalid_event_draft' } })
+    expect(store.read().state.createdEvents).toEqual([])
+  })
+
+  it('rejects a draft whose organisation context has been changed after review', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const draft = service.prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
+      name: 'Community Supper',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Riverside Hall',
+      capacity: 40,
+    })
+
+    expect(draft.ok).toBe(true)
+    if (!draft.ok) throw new Error('Expected event draft to succeed')
+    expect(service.confirmEventDraft({
+      draft: { ...draft.data, organisationId: 'org_unknown' },
+      actor: organiser,
+    })).toMatchObject({ ok: false, error: { code: 'invalid_event_draft' } })
     expect(store.read().state.createdEvents).toEqual([])
   })
 
@@ -403,7 +430,7 @@ describe('event operations application service', () => {
     })
   })
 
-  it('adds the event start time when loading state saved by the previous schema shape', () => {
+  it('adds event organisation context when loading state saved by the previous schema shape', () => {
     const memory = createMemoryStorage()
     const firstService = createService(createStore(memory.storage))
     expect(firstService.checkInAttendee({
@@ -412,9 +439,21 @@ describe('event operations application service', () => {
     }).ok).toBe(true)
 
     const stored = JSON.parse(memory.storage.getItem('test:event-operations') ?? '') as {
-      state: { event: Record<string, unknown> }
+      state: { event: Record<string, unknown>, createdEvents: Array<Record<string, unknown>> }
     }
     delete stored.state.event.startsAt
+    delete stored.state.event.organisationId
+    stored.state.createdEvents = [{
+      id: 'event_legacy',
+      sourceDraftId: 'draft_legacy',
+      name: 'Legacy Event',
+      startsAt: '2026-10-10T18:30:00.000Z',
+      venue: 'Main Hall',
+      capacity: 40,
+      createdAt: '2026-09-01T10:05:00.000Z',
+      createdBy: organiser,
+      isSynthetic: true,
+    }]
     memory.storage.setItem('test:event-operations', JSON.stringify(stored))
 
     const reloaded = createService(createStore(memory.storage)).getSnapshot()
@@ -424,7 +463,11 @@ describe('event operations application service', () => {
       data: {
         revision: 1,
         checkedInCount: 14,
-        event: { startsAt: '2026-09-05T18:30:00+01:00' },
+        event: {
+          organisationId: 'org_lantern_rooms',
+          startsAt: '2026-09-05T18:30:00+01:00',
+        },
+        createdEvents: [{ id: 'event_legacy', organisationId: 'org_lantern_rooms' }],
       },
     })
   })
@@ -465,6 +508,7 @@ describe('event operations application service', () => {
     service.subscribe((snapshot) => notifications.push(snapshot.revision))
 
     const draft = service.prepareEventDraft({
+      organisationId: 'org_lantern_rooms',
       name: 'Community Supper',
       startsAt: '2026-10-10T18:30:00.000Z',
       venue: 'Riverside Hall',
