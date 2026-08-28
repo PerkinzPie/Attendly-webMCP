@@ -122,6 +122,56 @@ describe('event operations application service', () => {
     expect(notifications).toBe(0)
   })
 
+  it('requires a specific attendee when preparing an ambiguous check-in', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const before = JSON.stringify(store.read())
+
+    const ambiguous = service.prepareAttendeeCheckIn({
+      query: 'Jenkins',
+      reason: 'Unrecognised ticket code',
+    })
+
+    expect(ambiguous).toEqual({
+      ok: false,
+      error: {
+        code: 'attendee_selection_required',
+        message: 'Select a specific attendee before checking in.',
+        remediation: 'Choose one attendee from the search results.',
+      },
+    })
+    expect(JSON.stringify(store.read())).toBe(before)
+  })
+
+  it('prepares a selected attendee check-in without persisting it', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+    const before = JSON.stringify(store.read())
+
+    const result = service.prepareAttendeeCheckIn({
+      query: 'Jenkins',
+      attendeeId: 'att_sarah_jenkins',
+      reason: 'Unrecognised ticket code',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        attendeeId: 'att_sarah_jenkins',
+        attendeeName: 'Sarah Jenkins',
+        registrationReference: 'RIV-001',
+        currentOccupancy: 13,
+        projectedOccupancy: 14,
+        capacity: 20,
+        capacityWarning: null,
+        reason: 'Unrecognised ticket code',
+      },
+    })
+    expect(JSON.stringify(store.read())).toBe(before)
+  })
+
   it('prepares, validates and confirms an event through one persisted transition', () => {
     const memory = createMemoryStorage()
     const store = createStore(memory.storage)

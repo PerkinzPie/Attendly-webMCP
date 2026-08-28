@@ -3,6 +3,7 @@ import {
   confirmEventDraft as applyEventCreation,
   getAccountabilitySnapshot,
   getEventSnapshot,
+  prepareAttendeeCheckIn as buildAttendeeCheckInReview,
   prepareEventDraft as buildEventDraft,
   searchAttendees as findAttendees,
   recordAccountabilityStatus as applyAccountabilityStatus,
@@ -10,6 +11,7 @@ import {
   type AccountabilitySnapshot,
   type AccountabilityStatus,
   type ActivityEntry,
+  type AttendeeCheckInReview,
   type AttendeeSearchResult,
   type CreatedEvent,
   type EventDraft,
@@ -33,6 +35,7 @@ export type EventOperation =
 export type EventOperationsServiceErrorCode =
   | 'not_authorised'
   | 'attendee_not_found'
+  | 'attendee_selection_required'
   | 'attendee_already_checked_in'
   | 'accountability_already_active'
   | 'accountability_not_active'
@@ -85,6 +88,12 @@ export type CheckInAttendeeRequest = {
   readonly reason?: string
 }
 
+export type PrepareAttendeeCheckInRequest = {
+  readonly query: string
+  readonly attendeeId?: string
+  readonly reason: string
+}
+
 export type StartAccountabilityRequest = {
   readonly actor: OperationsActor
 }
@@ -116,6 +125,7 @@ export type EventOperationsServiceOptions = {
 export type EventOperationsService = {
   getSnapshot(): EventOperationsServiceResult<EventOperationsServiceSnapshot>
   searchAttendees(query: string): EventOperationsServiceResult<readonly AttendeeSearchResult[]>
+  prepareAttendeeCheckIn(request: PrepareAttendeeCheckInRequest): EventOperationsServiceResult<AttendeeCheckInReview>
   prepareEventDraft(input: EventDraftInput): EventOperationsServiceResult<EventDraft>
   confirmEventDraft(request: ConfirmEventDraftRequest): EventOperationsServiceResult<CreateEventResult>
   checkInAttendee(request: CheckInAttendeeRequest): EventOperationsServiceResult<EventOperationsMutationResult>
@@ -147,6 +157,11 @@ const errors = {
     code: 'attendee_not_found',
     message: 'The selected attendee is not registered for this event.',
     remediation: 'Refresh the attendee list and select a registered attendee.',
+  }),
+  attendeeSelectionRequired: (): EventOperationsServiceError => ({
+    code: 'attendee_selection_required',
+    message: 'Select a specific attendee before checking in.',
+    remediation: 'Choose one attendee from the search results.',
   }),
   attendeeAlreadyCheckedIn: (): EventOperationsServiceError => ({
     code: 'attendee_already_checked_in',
@@ -268,6 +283,30 @@ export function createEventOperationsService(
     searchAttendees(query) {
       try {
         return { ok: true, data: findAttendees(options.store.read().state, query) }
+      } catch (error) {
+        return failure(error)
+      }
+    },
+    prepareAttendeeCheckIn(request) {
+      try {
+        const state = options.store.read().state
+        const matches = findAttendees(state, request.query)
+        if (!request.attendeeId && matches.length > 1) reject(errors.attendeeSelectionRequired())
+
+        const attendeeId = request.attendeeId ?? matches[0]?.attendeeId
+        if (!attendeeId) reject(errors.attendeeNotFound())
+        findAttendee(state, attendeeId)
+        if (state.checkIns.some((checkIn) => checkIn.attendeeId === attendeeId)) {
+          reject(errors.attendeeAlreadyCheckedIn())
+        }
+
+        return {
+          ok: true,
+          data: buildAttendeeCheckInReview(state, {
+            attendeeId,
+            reason: request.reason,
+          }),
+        }
       } catch (error) {
         return failure(error)
       }

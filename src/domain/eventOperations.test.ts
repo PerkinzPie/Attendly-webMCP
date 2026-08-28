@@ -5,6 +5,7 @@ import {
   createEventOperationsState,
   getAccountabilitySnapshot,
   getEventSnapshot,
+  prepareAttendeeCheckIn,
   recordAccountabilityStatus,
   prepareEventDraft,
   searchAttendees,
@@ -105,6 +106,49 @@ describe('event operations domain', () => {
     expect(prefixResults[0].name).toBe('Sarah Jenkins')
     expect(prefixResults.map((result) => result.name)).toEqual(['Sarah Jenkins', 'Isaac Turner'])
     expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('prepares a check-in review with projected occupancy before changing state', () => {
+    const state = createDemoEventOperationsState()
+    const before = JSON.stringify(state)
+
+    const review = prepareAttendeeCheckIn(state, {
+      attendeeId: 'att_sarah_jenkins',
+      reason: '  Unrecognised   ticket code ',
+    })
+
+    expect(review).toEqual({
+      attendeeId: 'att_sarah_jenkins',
+      attendeeName: 'Sarah Jenkins',
+      registrationReference: 'RIV-001',
+      currentOccupancy: 13,
+      projectedOccupancy: 14,
+      capacity: 20,
+      capacityWarning: null,
+      reason: 'Unrecognised ticket code',
+    })
+    expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('warns when a reviewed check-in reaches or exceeds capacity', () => {
+    const state = createDemoEventOperationsState()
+    const fullReview = prepareAttendeeCheckIn(createEventOperationsState({
+      ...state,
+      event: { ...state.event, capacity: 14 },
+    }), {
+      attendeeId: 'att_sarah_jenkins',
+      reason: 'Unrecognised ticket code',
+    })
+    const overReview = prepareAttendeeCheckIn(createEventOperationsState({
+      ...state,
+      event: { ...state.event, capacity: 13 },
+    }), {
+      attendeeId: 'att_sarah_jenkins',
+      reason: 'Unrecognised ticket code',
+    })
+
+    expect(fullReview.capacityWarning).toBe('This check-in will fill the event.')
+    expect(overReview.capacityWarning).toBe('This check-in will put the event 1 over capacity.')
   })
 
   it('normalises a reviewable event draft without changing persisted state', () => {

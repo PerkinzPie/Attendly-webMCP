@@ -123,10 +123,37 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('2 matches')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Leo Jenkins' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check in Sarah Jenkins' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check in Leo Jenkins' })).toBeInTheDocument()
 
     fireEvent.change(search, { target: { value: 'Nobody Here' } })
 
     expect(screen.getByText('No attendees found.')).toBeInTheDocument()
+  })
+
+  it('checks in a selected attendee only after explicit confirmation', () => {
+    const service = createTestOperationsService()
+    render(<App operationsService={service} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    fireEvent.change(screen.getByPlaceholderText('Search attendees'), {
+      target: { value: 'Sarah Jenkins' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check in Sarah Jenkins' }))
+
+    const confirmation = screen.getByRole('group', { name: 'Confirm check-in for Sarah Jenkins' })
+    expect(within(confirmation).getByText('Check in Sarah Jenkins?')).toBeInTheDocument()
+    expect(within(confirmation).getByText('Occupancy 14 of 20')).toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 13 } })
+
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm check-in' }))
+
+    const totals = screen.getByLabelText('Current event totals')
+    expect(within(totals).getByText('Checked in').nextElementSibling).toHaveTextContent('14')
+    expect(screen.getByText('Sarah Jenkins checked in.')).toBeInTheDocument()
+    const sarahResult = screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' }).closest('article')
+    expect(within(sarahResult as HTMLElement).getByText('Checked in')).toBeInTheDocument()
+    expect(within(sarahResult as HTMLElement).queryByRole('button', { name: 'Check in Sarah Jenkins' })).not.toBeInTheDocument()
   })
 
   it('validates and cancels an event draft without persisting it', () => {

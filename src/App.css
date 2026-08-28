@@ -599,6 +599,12 @@
   gap: 16px;
 }
 
+.attendee-check-in-button {
+  min-height: 34px;
+  padding: 0 13px;
+  font-size: 0.76rem;
+}
+
 .check-in-state {
   color: var(--text-subtle);
   font-size: 0.74rem;
@@ -608,6 +614,35 @@
 
 .check-in-state.checked-in { color: var(--success-strong); }
 .check-in-state.not-arrived { color: var(--warning-strong); }
+.check-in-success { color: var(--success-strong); font-weight: 650; }
+.check-in-error { color: var(--warning-strong); font-weight: 650; }
+
+.check-in-confirmation {
+  margin: 0 0 16px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--neutral-100);
+}
+
+.check-in-confirmation > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.check-in-confirmation strong { color: var(--ink); font-size: 0.88rem; }
+.check-in-confirmation span { color: var(--text-subtle); font-size: 0.78rem; }
+.check-in-confirmation .check-in-capacity-warning { margin: 10px 0 0; color: var(--warning-strong); font-size: 0.78rem; font-weight: 620; }
+
+.check-in-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.check-in-confirmation-actions .button { min-height: 36px; padding: 0 14px; font-size: 0.78rem; }
 
 .registration-group {
   margin: 0 0 16px;
@@ -915,7 +950,8 @@ footer { color: var(--neutral-0); background: var(--navy); }
   .workspace-totals > div:nth-child(3) { padding-left: 0; border-bottom: 0; }
   .workspace-totals > div:last-child { padding-right: 0; border-bottom: 0; }
   .attendee-result-summary { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .attendee-result-actions { width: 100%; justify-content: space-between; }
+  .attendee-result-actions { width: 100%; flex-wrap: wrap; justify-content: space-between; }
+  .check-in-confirmation > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
   .event-creation-form { grid-template-columns: 1fr; }
   .panel-heading,
   .capacity-summary { align-items: flex-start; flex-direction: column; }

@@ -5,7 +5,7 @@ import type {
   EventOperationsService,
   EventOperationsServiceSnapshot,
 } from './application/eventOperationsService'
-import type { AttendeeSearchResult, CreatedEvent, EventDraft } from './domain/eventOperations'
+import type { AttendeeCheckInReview, AttendeeSearchResult, CreatedEvent, EventDraft } from './domain/eventOperations'
 import {
   demoEvents,
   demoOrganisations,
@@ -335,6 +335,8 @@ function OperationsWorkspace({
   onRefresh,
   onBrowseEvents,
   onSearchAttendees,
+  onPrepareAttendeeCheckIn,
+  onCheckInAttendee,
   onPrepareEventDraft,
   onConfirmEventDraft,
 }: {
@@ -344,11 +346,15 @@ function OperationsWorkspace({
   onRefresh: () => void
   onBrowseEvents: () => void
   onSearchAttendees: EventOperationsService['searchAttendees']
+  onPrepareAttendeeCheckIn: EventOperationsService['prepareAttendeeCheckIn']
+  onCheckInAttendee: EventOperationsService['checkInAttendee']
   onPrepareEventDraft: EventOperationsService['prepareEventDraft']
   onConfirmEventDraft: EventOperationsService['confirmEventDraft']
 }) {
   const [attendeeQuery, setAttendeeQuery] = useState('')
   const [expandedAttendeeId, setExpandedAttendeeId] = useState<string | null>(null)
+  const [checkInReview, setCheckInReview] = useState<AttendeeCheckInReview | null>(null)
+  const [checkInFeedback, setCheckInFeedback] = useState<{ type: 'error' | 'success', message: string } | null>(null)
   const [isCreatingEvent, setIsCreatingEvent] = useState(false)
   const accountabilityLabel = snapshot?.activeAccountability
     ? `${snapshot.activeAccountability.unconfirmed} unconfirmed`
@@ -358,6 +364,47 @@ function OperationsWorkspace({
   const attendeeResults: readonly AttendeeSearchResult[] = attendeeSearchResult?.ok
     ? attendeeSearchResult.data
     : []
+
+  const updateAttendeeQuery = (query: string) => {
+    setAttendeeQuery(query)
+    setCheckInReview(null)
+    setCheckInFeedback(null)
+  }
+
+  const reviewCheckIn = (attendeeId: string) => {
+    const result = onPrepareAttendeeCheckIn({
+      query: attendeeQuery,
+      attendeeId,
+      reason: 'Unrecognised ticket code',
+    })
+
+    if (!result.ok) {
+      setCheckInReview(null)
+      setCheckInFeedback({ type: 'error', message: result.error.message })
+      return
+    }
+
+    setCheckInReview(result.data)
+    setCheckInFeedback(null)
+  }
+
+  const confirmCheckIn = () => {
+    if (!checkInReview) return
+    const result = onCheckInAttendee({
+      attendeeId: checkInReview.attendeeId,
+      actor: demoUiActor,
+      reason: checkInReview.reason,
+    })
+
+    if (!result.ok) {
+      setCheckInFeedback({ type: 'error', message: result.error.message })
+      setCheckInReview(null)
+      return
+    }
+
+    setCheckInFeedback({ type: 'success', message: `${checkInReview.attendeeName} checked in.` })
+    setCheckInReview(null)
+  }
 
   return (
     <section className="operations-workspace" aria-labelledby="operations-title">
@@ -393,7 +440,7 @@ function OperationsWorkspace({
                 label="Search attendees"
                 placeholder="Search attendees"
                 value={attendeeQuery}
-                onChange={setAttendeeQuery}
+                onChange={updateAttendeeQuery}
               />
 
               {attendeeSearchResult && !attendeeSearchResult.ok ? (
@@ -402,6 +449,15 @@ function OperationsWorkspace({
 
               {attendeeSearchResult?.ok && attendeeResults.length === 0 ? (
                 <p className="attendee-search-message">No attendees found.</p>
+              ) : null}
+
+              {checkInFeedback ? (
+                <p
+                  className={`attendee-search-message check-in-${checkInFeedback.type}`}
+                  role={checkInFeedback.type === 'error' ? 'alert' : 'status'}
+                >
+                  {checkInFeedback.message}
+                </p>
               ) : null}
 
               {attendeeResults.length > 0 ? (
@@ -421,6 +477,16 @@ function OperationsWorkspace({
                               <span className={`check-in-state ${attendee.checkIn.status}`}>
                                 {attendee.checkIn.status === 'checked-in' ? 'Checked in' : 'Not arrived'}
                               </span>
+                              {attendee.checkIn.status === 'not-arrived' ? (
+                                <button
+                                  className="button button-primary attendee-check-in-button"
+                                  type="button"
+                                  aria-label={`Check in ${attendee.name}`}
+                                  onClick={() => reviewCheckIn(attendee.attendeeId)}
+                                >
+                                  Check in
+                                </button>
+                              ) : null}
                               <button
                                 className="text-action"
                                 type="button"
@@ -433,6 +499,22 @@ function OperationsWorkspace({
                               </button>
                             </div>
                           </div>
+
+                          {checkInReview?.attendeeId === attendee.attendeeId ? (
+                            <div className="check-in-confirmation" role="group" aria-label={`Confirm check-in for ${attendee.name}`}>
+                              <div>
+                                <strong>Check in {attendee.name}?</strong>
+                                <span>Occupancy {checkInReview.projectedOccupancy} of {checkInReview.capacity}</span>
+                              </div>
+                              {checkInReview.capacityWarning ? (
+                                <p className="check-in-capacity-warning">{checkInReview.capacityWarning}</p>
+                              ) : null}
+                              <div className="check-in-confirmation-actions">
+                                <button className="button button-secondary" type="button" onClick={() => setCheckInReview(null)}>Cancel</button>
+                                <button className="button button-primary" type="button" onClick={confirmCheckIn}>Confirm check-in</button>
+                              </div>
+                            </div>
+                          ) : null}
 
                           {isExpanded ? (
                             <div className="registration-group" id={registrationPanelId}>
@@ -713,6 +795,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             onRefresh={refreshOperations}
             onBrowseEvents={showDirectory}
             onSearchAttendees={service.searchAttendees}
+            onPrepareAttendeeCheckIn={service.prepareAttendeeCheckIn}
+            onCheckInAttendee={service.checkInAttendee}
             onPrepareEventDraft={service.prepareEventDraft}
             onConfirmEventDraft={service.confirmEventDraft}
           />

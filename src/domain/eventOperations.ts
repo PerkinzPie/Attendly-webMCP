@@ -158,6 +158,17 @@ export type AttendeeSearchResult = {
   }[]
 }
 
+export type AttendeeCheckInReview = {
+  readonly attendeeId: string
+  readonly attendeeName: string
+  readonly registrationReference: string
+  readonly currentOccupancy: number
+  readonly projectedOccupancy: number
+  readonly capacity: number
+  readonly capacityWarning: string | null
+  readonly reason: string
+}
+
 export type OperationsTransition = {
   readonly state: EventOperationsState
   readonly eventSnapshot: EventSnapshot
@@ -190,6 +201,11 @@ export type CheckInAttendeeCommand = {
   readonly checkedInAt: string
   readonly actor: OperationsActor
   readonly reason?: string
+}
+
+export type PrepareAttendeeCheckInCommand = {
+  readonly attendeeId: string
+  readonly reason: string
 }
 
 export type StartAccountabilityCommand = {
@@ -495,6 +511,39 @@ export function searchAttendees(
         }),
       }
     })
+}
+
+export function prepareAttendeeCheckIn(
+  state: EventOperationsState,
+  command: PrepareAttendeeCheckInCommand,
+): AttendeeCheckInReview {
+  const attendee = state.attendees.find((item) => item.id === command.attendeeId)
+  invariant(attendee, 'Attendee does not exist')
+  invariant(
+    !state.checkIns.some((checkIn) => checkIn.attendeeId === command.attendeeId),
+    'Attendee is already checked in',
+  )
+  const group = state.registrationGroups.find((item) => item.id === attendee.registrationGroupId)
+  invariant(group, `Attendee ${attendee.id} has no registration group`)
+
+  const currentOccupancy = getEventSnapshot(state).occupancy
+  const projectedOccupancy = currentOccupancy + 1
+  const capacityWarning = projectedOccupancy > state.event.capacity
+    ? `This check-in will put the event ${projectedOccupancy - state.event.capacity} over capacity.`
+    : projectedOccupancy === state.event.capacity
+      ? 'This check-in will fill the event.'
+      : null
+
+  return {
+    attendeeId: attendee.id,
+    attendeeName: attendee.name,
+    registrationReference: group.reference,
+    currentOccupancy,
+    projectedOccupancy,
+    capacity: state.event.capacity,
+    capacityWarning,
+    reason: normaliseText(command.reason),
+  }
 }
 
 export function checkInAttendee(
