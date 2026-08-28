@@ -1,10 +1,14 @@
 import type { EventDraftInput } from '../domain/eventOperations'
+import type { WebMcpTool } from './browserAdapter'
 
 export type ManagedEventToolRecord = {
   readonly id: string
   readonly organisationId: string
+  readonly organisationName: string
+  readonly organisationLocation: string
   readonly name: string
   readonly startsAt: string
+  readonly venue: string
   readonly capacity: number
   readonly state: string
 }
@@ -13,28 +17,6 @@ export type EventPreparationToolHandlers = {
   listEvents(): unknown
   createEventDraft(input: EventDraftInput): unknown
   confirmEventCreation(draftId: string): unknown
-}
-
-export type WebMcpTool = {
-  readonly name: string
-  readonly title: string
-  readonly description: string
-  readonly inputSchema: Record<string, unknown>
-  readonly annotations?: {
-    readonly readOnlyHint?: boolean
-    readonly untrustedContentHint?: boolean
-  }
-  readonly execute: (input: Record<string, unknown>) => unknown | Promise<unknown>
-}
-
-export type WebMcpModelContext = {
-  registerTool(tool: WebMcpTool, options?: { signal?: AbortSignal }): Promise<void>
-}
-
-declare global {
-  interface Document {
-    readonly modelContext?: WebMcpModelContext
-  }
 }
 
 function asEventDraftInput(input: Record<string, unknown>): EventDraftInput {
@@ -55,7 +37,7 @@ export function createEventPreparationTools(
     {
       name: 'list_events',
       title: 'List events',
-      description: 'Read the events currently available to the organiser, including each event identifier, organisation, date, capacity and state. This does not change event data.',
+      description: 'Read the events currently available to the organiser, including each event identifier, organisation, location, venue, date, capacity and state. This does not change event data.',
       inputSchema: {
         type: 'object',
         properties: {},

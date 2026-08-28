@@ -5,7 +5,7 @@ import { createEventOperationsService, type EventOperationsService } from './app
 import { createPersistentEventOperationsStore } from './application/eventOperationsStore'
 import { createDemoEventOperationsState, demoOrganisations } from './demo/seed'
 import type { OperationsActor } from './domain/eventOperations'
-import type { WebMcpTool } from './webmcp/eventPreparationTools'
+import type { WebMcpTool } from './webmcp/browserAdapter'
 
 const organiser: OperationsActor = {
   id: 'actor_shell_test',
@@ -94,11 +94,12 @@ describe('Attendly organisation directory', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Find events in your community' })).toBeInTheDocument()
     expect(screen.getByText('6 organisations · 18 events')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Westbrook Primary School' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'St Luke’s Community Church' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Westbrook Autumn Fair' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Willowbrook Primary School' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'St Cuthbert’s Parish Church' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Willowbrook Autumn Fair' })).not.toBeInTheDocument()
     expect(screen.queryByText(/synthetic demo/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/fictional and use synthetic data/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Site tools require a WebMCP-enabled browser.')).toBeInTheDocument()
   })
 
   it('lists events and opens a stable event management context', () => {
@@ -125,7 +126,7 @@ describe('Attendly organisation directory', () => {
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Riverside Community Workshop' })).toHaveFocus()
-    expect(screen.getByText('The Lantern Rooms')).toBeInTheDocument()
+    expect(screen.getByText('The Old Market Rooms · Frome, Somerset')).toBeInTheDocument()
     expect(screen.queryByText('Event ID')).not.toBeInTheDocument()
     expect(screen.queryByText('evt_riverside_community_workshop')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Activity' })).toBeInTheDocument()
@@ -159,6 +160,7 @@ describe('Attendly organisation directory', () => {
       'create_event_draft',
       'confirm_event_creation',
     ]))
+    expect(screen.queryByText('Site tools require a WebMCP-enabled browser.')).not.toBeInTheDocument()
 
     const listResult = await tools.get('list_events')?.execute({}) as {
       structuredContent: { ok: boolean, events: Array<Record<string, unknown>> }
@@ -168,7 +170,10 @@ describe('Attendly organisation directory', () => {
     expect(listResult.structuredContent.events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'evt_riverside_community_workshop',
+        organisationName: 'The Old Market Rooms',
+        organisationLocation: 'Frome, Somerset',
         name: 'Riverside Community Workshop',
+        venue: 'Riverside Community Hall',
         capacity: 20,
         state: 'Check-in open',
       }),
@@ -221,7 +226,7 @@ describe('Attendly organisation directory', () => {
       await confirmTool?.execute({ draftId })
     })
 
-    expect(confirm).toHaveBeenLastCalledWith('Create “Family Games Night” for The Lantern Rooms?')
+    expect(confirm).toHaveBeenLastCalledWith('Create “Family Games Night” for The Old Market Rooms?')
     expect(screen.getByRole('heading', { level: 2, name: 'Family Games Night' })).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({
       ok: true,
@@ -241,12 +246,69 @@ describe('Attendly organisation directory', () => {
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [{ name: 'Family Games Night' }] } })
   })
 
+  it('replaces event-list tools with the current event context and rejects stale execution', async () => {
+    const tools = installModelContext()
+    render(<App operationsService={createTestOperationsService()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+
+    await waitFor(() => expect([...tools.keys()]).toEqual([
+      'list_events',
+      'create_event_draft',
+      'confirm_event_creation',
+    ]))
+    const staleListTool = tools.get('list_events')
+
+    const eventRow = screen.getByRole('heading', { level: 2, name: 'Riverside Community Workshop' }).closest('article')
+    expect(eventRow).not.toBeNull()
+    fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
+    await waitFor(() => expect([...tools.keys()]).toEqual(['get_active_event_context']))
+    await expect(staleListTool?.execute({})).rejects.toMatchObject({ name: 'AbortError' })
+    const result = await tools.get('get_active_event_context')?.execute({}) as {
+      structuredContent: { event: { eventId: string, organisationId: string, organisationName: string, organisationLocation: string, venue: string } }
+    }
+    expect(result.structuredContent.event).toEqual({
+      eventId: 'evt_riverside_community_workshop',
+      organisationId: 'org_lantern_rooms',
+      organisationName: 'The Old Market Rooms',
+      organisationLocation: 'Frome, Somerset',
+      name: 'Riverside Community Workshop',
+      venue: 'Riverside Community Hall',
+    })
+    const staleEventContextTool = tools.get('get_active_event_context')
+
+    fireEvent.click(screen.getByRole('button', { name: '← Events' }))
+    await waitFor(() => expect([...tools.keys()]).toEqual([
+      'list_events',
+      'create_event_draft',
+      'confirm_event_creation',
+    ]))
+
+    const nextEventRow = screen.getByRole('heading', { level: 2, name: 'Family Sports Taster Day' }).closest('article')
+    expect(nextEventRow).not.toBeNull()
+    fireEvent.click(within(nextEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
+    await waitFor(() => expect([...tools.keys()]).toEqual(['get_active_event_context']))
+    await expect(staleEventContextTool?.execute({})).rejects.toMatchObject({ name: 'AbortError' })
+    const nextResult = await tools.get('get_active_event_context')?.execute({}) as {
+      structuredContent: { event: { eventId: string, organisationId: string, organisationName: string, organisationLocation: string, name: string, venue: string } }
+    }
+    expect(nextResult.structuredContent.event).toEqual({
+      eventId: 'evt_family_sports',
+      organisationId: 'org_redland_sports',
+      organisationName: 'Kingsmead Community Sports Club',
+      organisationLocation: 'Bath, Somerset',
+      name: 'Family Sports Taster Day',
+      venue: 'Kingsmead Sports Ground',
+    })
+  })
+
   it('lists and filters events across organisations while preserving their context', () => {
     render(<App operationsService={createTestOperationsService()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
 
     expect(screen.getByText('19 events')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Friends of Westbrook PTA' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Friends of Willowbrook Primary · Cheltenham, Gloucestershire' })).toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter events by organisation' }), {
       target: { value: 'org_westbrook_pta' },
     })
@@ -255,14 +317,14 @@ describe('Attendly organisation directory', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'Family Printmaking Workshop' })).not.toBeInTheDocument()
     const publishedEventRow = screen.getByRole('heading', { level: 2, name: 'Year 6 Family Quiz Night' }).closest('article')
     expect(publishedEventRow).not.toBeNull()
-    expect(within(publishedEventRow as HTMLElement).getByText('Friends of Westbrook PTA')).toBeInTheDocument()
+    expect(within(publishedEventRow as HTMLElement).getByText('Friends of Willowbrook Primary · Cheltenham, Gloucestershire')).toBeInTheDocument()
     expect(within(publishedEventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Published')
 
     fireEvent.click(within(publishedEventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Year 6 Family Quiz Night' })).toHaveFocus()
-    expect(screen.getByText('Friends of Westbrook PTA')).toBeInTheDocument()
-    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Westbrook Main Hall')
+    expect(screen.getByText('Friends of Willowbrook Primary · Cheltenham, Gloucestershire')).toBeInTheDocument()
+    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Willowbrook Main Hall')
     expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
     expect(window.location.pathname).toBe('/organisations/org_westbrook_pta/events/evt_quiz_night')
   })
@@ -408,7 +470,7 @@ describe('Attendly organisation directory', () => {
     const review = screen.getByRole('heading', { name: 'Review event' }).closest('div')
     expect(review).not.toBeNull()
     expect(within(review as HTMLElement).getByText('Family Games Night')).toBeInTheDocument()
-    expect(within(review as HTMLElement).getByText('Friends of Westbrook PTA')).toBeInTheDocument()
+    expect(within(review as HTMLElement).getByText('Friends of Willowbrook Primary · Cheltenham, Gloucestershire')).toBeInTheDocument()
     expect(within(review as HTMLElement).getByText('Main Hall')).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { revision: 0, createdEvents: [] } })
 
@@ -418,7 +480,7 @@ describe('Attendly organisation directory', () => {
     const createdEventRow = screen.getByRole('heading', { level: 2, name: 'Family Games Night' }).closest('article')
     expect(createdEventRow).not.toBeNull()
     expect(screen.getByText('20 events')).toBeInTheDocument()
-    expect(within(createdEventRow as HTMLElement).getByText('Friends of Westbrook PTA')).toBeInTheDocument()
+    expect(within(createdEventRow as HTMLElement).getByText('Friends of Willowbrook Primary · Cheltenham, Gloucestershire')).toBeInTheDocument()
     expect(within(createdEventRow as HTMLElement).getByText('10 Oct 2026, 18:30')).toBeInTheDocument()
     expect(within(createdEventRow as HTMLElement).getByText('Capacity').parentElement).toHaveTextContent('40')
     expect(within(createdEventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Not started')
@@ -434,7 +496,7 @@ describe('Attendly organisation directory', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Family Games Night' })).toHaveFocus()
     expect(screen.queryByText('event_2')).not.toBeInTheDocument()
-    expect(screen.getByText('Friends of Westbrook PTA')).toBeInTheDocument()
+    expect(screen.getByText('Friends of Willowbrook Primary · Cheltenham, Gloucestershire')).toBeInTheDocument()
     expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Main Hall')
     expect(window.location.pathname).toBe('/organisations/org_westbrook_pta/events/event_2')
   })
@@ -556,10 +618,10 @@ describe('Attendly organisation directory', () => {
     expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App operationsService={service} />)
-    openOrganisation('Westbrook Primary School')
-    const eventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
+    openOrganisation('Willowbrook Primary School')
+    const eventRow = screen.getByRole('heading', { name: 'Willowbrook Autumn Fair' }).closest('article')
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'View event' }))
-    const eventDialog = screen.getByRole('dialog', { name: 'Westbrook Autumn Fair' })
+    const eventDialog = screen.getByRole('dialog', { name: 'Willowbrook Autumn Fair' })
     expect(within(eventDialog).queryByRole('button', { name: 'Reset demo' })).not.toBeInTheDocument()
     fireEvent.click(within(eventDialog).getByRole('button', { name: 'Book free tickets' }))
     fireEvent.change(within(eventDialog).getByLabelText('Your name'), { target: { value: 'Alex Morgan' } })
@@ -571,10 +633,10 @@ describe('Attendly organisation directory', () => {
       data: { checkedInCount: 13, notArrivedCount: 3, activeAccountability: null },
     })
 
-    openOrganisation('Westbrook Primary School')
-    const resetEventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
+    openOrganisation('Willowbrook Primary School')
+    const resetEventRow = screen.getByRole('heading', { name: 'Willowbrook Autumn Fair' }).closest('article')
     fireEvent.click(within(resetEventRow as HTMLElement).getByRole('button', { name: 'View event' }))
-    const restoredEventDialog = screen.getByRole('dialog', { name: 'Westbrook Autumn Fair' })
+    const restoredEventDialog = screen.getByRole('dialog', { name: 'Willowbrook Autumn Fair' })
     fireEvent.click(within(restoredEventDialog).getByRole('button', { name: 'Book free tickets' }))
     expect(within(restoredEventDialog).getByLabelText('Your name')).toHaveValue('')
   })
@@ -621,7 +683,7 @@ describe('Attendly organisation directory', () => {
     const { unmount } = render(<App operationsService={createTestOperationsService()} />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Event not found' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { level: 1, name: 'Westbrook Autumn Fair' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Willowbrook Autumn Fair' })).not.toBeInTheDocument()
 
     unmount()
     window.history.replaceState(null, '', '/events/evt_riverside_community_workshop')
@@ -638,37 +700,37 @@ describe('Attendly organisation directory', () => {
       target: { value: 'coding' },
     })
 
-    expect(screen.getByRole('heading', { name: 'Harbour Youth Project' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Westbrook Primary School' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Severnside Youth Project' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Willowbrook Primary School' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByPlaceholderText('Search organisations, places or events'), {
       target: { value: '' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Church' }))
 
-    expect(screen.getByRole('heading', { name: 'St Luke’s Community Church' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'The Lantern Rooms' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'St Cuthbert’s Parish Church' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'The Old Market Rooms' })).not.toBeInTheDocument()
   })
 
   it('scopes event discovery and booking beneath the selected organisation', () => {
     render(<App />)
-    openOrganisation('Westbrook Primary School')
+    openOrganisation('Willowbrook Primary School')
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Westbrook Primary School' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Westbrook Autumn Fair' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Willowbrook Primary School' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Willowbrook Autumn Fair' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Online Safety for Families' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Year 6 Family Quiz Night' })).not.toBeInTheDocument()
 
-    const eventRow = screen.getByRole('heading', { name: 'Westbrook Autumn Fair' }).closest('article')
+    const eventRow = screen.getByRole('heading', { name: 'Willowbrook Autumn Fair' }).closest('article')
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'View event' }))
     const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByText('Hosted by Westbrook Primary School')).toBeInTheDocument()
+    expect(within(dialog).getByText('Hosted by Willowbrook Primary School · Cheltenham, Gloucestershire')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Book free tickets' }))
     fireEvent.change(within(dialog).getByLabelText('Your name'), { target: { value: 'Alex Morgan' } })
     fireEvent.change(within(dialog).getByLabelText(/Email address/), { target: { value: 'alex@example.test' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /review booking/i }))
 
-    expect(within(dialog).getByText('Westbrook Primary School')).toBeInTheDocument()
+    expect(within(dialog).getByText('Willowbrook Primary School · Cheltenham, Gloucestershire')).toBeInTheDocument()
     expect(within(dialog).getByRole('heading', { name: 'Check your booking' })).toBeInTheDocument()
   })
 })

@@ -10,6 +10,7 @@ export type EventRecord = {
   readonly organisationId: string
   readonly name: string
   readonly startsAt: string
+  readonly venue: string
   readonly capacity: number
   readonly isSynthetic: true
 }
@@ -296,6 +297,7 @@ function cloneActor(actor: OperationsActor): OperationsActor {
 
 function validateState(state: EventOperationsState) {
   invariant(state.event.organisationId.length > 0, 'Event organisation must be identified')
+  invariant(state.event.venue.length > 0, 'Event venue must be identified')
   invariant(state.event.capacity > 0, 'Event capacity must be greater than zero')
   invariant(!Number.isNaN(Date.parse(state.event.startsAt)), 'Event start time must be valid')
   invariant(state.capacityRule.warningThreshold >= 0, 'Capacity warning threshold cannot be negative')

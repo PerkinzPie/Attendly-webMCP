@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { createDemoOperationsSeed } from './seed'
+import { createDemoOperationsSeed, demoOrganisations } from './seed'
 
 describe('deterministic event-operations seed', () => {
+  it('gives every organisation a specific English location', () => {
+    expect(demoOrganisations.map(({ name, location }) => ({ name, location }))).toEqual([
+      { name: 'Willowbrook Primary School', location: 'Cheltenham, Gloucestershire' },
+      { name: 'Friends of Willowbrook Primary', location: 'Cheltenham, Gloucestershire' },
+      { name: 'St Cuthbert’s Parish Church', location: 'York, North Yorkshire' },
+      { name: 'The Old Market Rooms', location: 'Frome, Somerset' },
+      { name: 'Severnside Youth Project', location: 'Gloucester, Gloucestershire' },
+      { name: 'Kingsmead Community Sports Club', location: 'Bath, Somerset' },
+    ])
+    expect(demoOrganisations.every((organisation) => organisation.location.trim().length > 0)).toBe(true)
+  })
+
   it('creates the documented Riverside workshop starting state', () => {
     const seed = createDemoOperationsSeed()
     const checkedInAttendeeIds = new Set(seed.checkIns.map((checkIn) => checkIn.attendeeId))

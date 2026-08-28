@@ -69,6 +69,7 @@ export type EventOperationsServiceSnapshot = {
     readonly organisationId: string
     readonly name: string
     readonly startsAt: string
+    readonly venue: string
     readonly capacity: number
   }
   readonly registrationCount: number
@@ -242,6 +243,7 @@ function toSnapshot(
       organisationId: persisted.state.event.organisationId,
       name: persisted.state.event.name,
       startsAt: persisted.state.event.startsAt,
+      venue: persisted.state.event.venue,
       capacity: persisted.state.event.capacity,
     },
     registrationCount: eventSnapshot.registeredAttendees,

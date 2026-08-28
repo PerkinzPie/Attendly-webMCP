@@ -95,6 +95,7 @@ describe('event operations application service', () => {
         organisationId: 'org_lantern_rooms',
         name: 'Riverside Community Workshop',
         startsAt: '2026-09-05T18:30:00+01:00',
+        venue: 'Riverside Community Hall',
         capacity: 20,
       },
       registrationCount: 16,
@@ -525,6 +526,7 @@ describe('event operations application service', () => {
     }
     delete stored.state.event.startsAt
     delete stored.state.event.organisationId
+    delete stored.state.event.venue
     stored.state.createdEvents = [{
       id: 'event_legacy',
       sourceDraftId: 'draft_legacy',
@@ -554,6 +556,7 @@ describe('event operations application service', () => {
         event: {
           organisationId: 'org_lantern_rooms',
           startsAt: '2026-09-05T18:30:00+01:00',
+          venue: 'Riverside Community Hall',
         },
         activityTimeline: [{
           targetLabel: 'att_sarah_jenkins',

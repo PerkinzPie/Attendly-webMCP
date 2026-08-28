@@ -86,6 +86,7 @@ function parsePersisted(raw: string, initialState: EventOperationsState): Persis
         ...storedEventRecord,
         ...(!('startsAt' in storedEventRecord) ? { startsAt: initialState.event.startsAt } : {}),
         ...(!('organisationId' in storedEventRecord) ? { organisationId: initialState.event.organisationId } : {}),
+        ...(!('venue' in storedEventRecord) ? { venue: initialState.event.venue } : {}),
       }
     : storedEvent
   const migratedCreatedEvents = Array.isArray(storedState.createdEvents)

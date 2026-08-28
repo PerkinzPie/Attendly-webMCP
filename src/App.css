@@ -1013,6 +1013,7 @@ footer { color: var(--neutral-0); background: var(--navy); }
 .footer-links button { padding: 0; border: 0; color: var(--neutral-300); background: transparent; font-size: 0.8rem; text-decoration: none; cursor: pointer; }
 .footer-links a:hover,
 .footer-links button:hover { color: var(--neutral-0); }
+.webmcp-compatibility { width: min(100% - 40px, 1120px); margin: 0 auto; padding: 0 0 28px; color: var(--neutral-400); font-size: 0.75rem; }
 
 .button {
   min-height: 40px;

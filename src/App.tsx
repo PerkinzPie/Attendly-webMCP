@@ -27,6 +27,12 @@ import {
   createEventPreparationTools,
   type ManagedEventToolRecord,
 } from './webmcp/eventPreparationTools'
+import {
+  hasWebMcpSupport,
+  registerWebMcpTools,
+  webMcpCompatibilityGuidance,
+} from './webmcp/browserAdapter'
+import { createEventContextTools } from './webmcp/eventContextTools'
 
 type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
@@ -42,6 +48,10 @@ type AppRoute = {
 }
 
 const organisationsById = new Map(demoOrganisations.map((organisation) => [organisation.id, organisation]))
+
+function formatOrganisationContext(organisation: DemoOrganisation) {
+  return `${organisation.name} · ${organisation.location}`
+}
 
 const demoUiActor = {
   id: 'actor_demo_demonstrator',
@@ -225,8 +235,11 @@ function getManagedEvents(snapshot: EventOperationsServiceSnapshot | null): read
     ...demoManagedEvents.map((event) => ({
       id: event.id,
       organisationId: event.organisationId,
+      organisationName: organisationsById.get(event.organisationId)?.name ?? '',
+      organisationLocation: organisationsById.get(event.organisationId)?.location ?? '',
       name: event.id === snapshot?.event.id ? snapshot.event.name : event.name,
       startsAt: event.id === snapshot?.event.id ? snapshot.event.startsAt : event.startsAt,
+      venue: event.id === snapshot?.event.id ? snapshot.event.venue : event.venue,
       capacity: event.id === snapshot?.event.id ? snapshot.event.capacity : event.capacity,
       state: event.id === snapshot?.event.id
         ? snapshot.checkedInCount > 0 ? 'Check-in open' : 'Not started'
@@ -235,8 +248,11 @@ function getManagedEvents(snapshot: EventOperationsServiceSnapshot | null): read
     ...(snapshot?.createdEvents.map((event) => ({
       id: event.id,
       organisationId: event.organisationId,
+      organisationName: organisationsById.get(event.organisationId)?.name ?? '',
+      organisationLocation: organisationsById.get(event.organisationId)?.location ?? '',
       name: event.name,
       startsAt: event.startsAt,
+      venue: event.venue,
       capacity: event.capacity,
       state: 'Not started',
     })) ?? []),
@@ -350,7 +366,7 @@ function EventCreationWorkspace({
         <div className="event-draft-review">
           <h3>Review event</h3>
           <dl>
-            <div><dt>Organisation</dt><dd>{organisationsById.get(draft.organisationId)?.name}</dd></div>
+            <div><dt>Organisation</dt><dd>{formatOrganisationContext(organisationsById.get(draft.organisationId)!)}</dd></div>
             <div><dt>Name</dt><dd>{draft.name}</dd></div>
             <div><dt>Date and time</dt><dd>{formatEventDate(draft.startsAt)}</dd></div>
             <div><dt>Venue</dt><dd>{draft.venue}</dd></div>
@@ -377,7 +393,7 @@ function EventCreationWorkspace({
             >
               <option value="">Select organisation</option>
               {organisations.map((organisation) => (
-                <option value={organisation.id} key={organisation.id}>{organisation.name}</option>
+                <option value={organisation.id} key={organisation.id}>{formatOrganisationContext(organisation)}</option>
               ))}
             </select>
             {fieldError('organisationId') ? (
@@ -488,7 +504,7 @@ function EventsWorkspace({
             >
               <option value="all">All organisations</option>
               {demoOrganisations.map((organisation) => (
-                <option value={organisation.id} key={organisation.id}>{organisation.name}</option>
+                <option value={organisation.id} key={organisation.id}>{formatOrganisationContext(organisation)}</option>
               ))}
             </select>
             <button
@@ -525,7 +541,7 @@ function EventsWorkspace({
               <li key={event.id}>
                 <article className="managed-event-row">
                   <div>
-                    <p className="managed-event-organisation">{organisationsById.get(event.organisationId)?.name}</p>
+                    <p className="managed-event-organisation">{formatOrganisationContext(organisationsById.get(event.organisationId)!)}</p>
                     <h2>{event.name}</h2>
                     <time dateTime={event.startsAt}>{formatEventDate(event.startsAt)}</time>
                   </div>
@@ -570,7 +586,7 @@ function EventOverviewWorkspace({
         <button className="breadcrumb" type="button" onClick={onBack}>← Events</button>
         <div className="event-context-heading">
           <div>
-            <p className="workspace-context">{organisation.name}</p>
+            <p className="workspace-context">{formatOrganisationContext(organisation)}</p>
             <h1 id="created-event-title" ref={headingRef} tabIndex={-1}>{event.name}</h1>
           </div>
           <span className="state-badge">{status}</span>
@@ -703,7 +719,7 @@ function OperationsWorkspace({
         <div className="workspace-heading">
           <div>
             <button className="breadcrumb" type="button" onClick={onBackToEvents}>← Events</button>
-            <p className="workspace-context">{organisation.name}</p>
+            <p className="workspace-context">{formatOrganisationContext(organisation)}</p>
             <h1 id="operations-title" ref={headingRef} tabIndex={-1}>{snapshot?.event.name ?? 'Event'}</h1>
           </div>
           {snapshot ? (
@@ -967,6 +983,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const [service] = useState(() => operationsService ?? getDemoEventOperationsService())
   const [initialOperationsResult] = useState(() => service.getSnapshot())
   const [initialRoute] = useState(readAppRoute)
+  const [webMcpSupported] = useState(hasWebMcpSupport)
   const [surface, setSurface] = useState<AppSurface>(initialRoute.surface)
   const [operationsOrganisationId, setOperationsOrganisationId] = useState<string | null>(initialRoute.organisationId)
   const [operationsEventId, setOperationsEventId] = useState<string | null>(initialRoute.eventId)
@@ -1185,75 +1202,87 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   }
 
   useEffect(() => {
-    if (
-      surface !== 'events'
-      || operationsOrganisationId !== null
-      || operationsEventId !== null
-    ) return
+    if (surface !== 'events') return
 
-    const modelContext = document.modelContext
-    if (!modelContext) return
-    const controller = new AbortController()
-    const tools = createEventPreparationTools({
-      listEvents: () => {
-        const snapshot = service.getSnapshot()
-        if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
-        const events = getManagedEvents(snapshot.data)
-        return webMcpResult(`Found ${events.length} events.`, { ok: true, events })
-      },
-      createEventDraft: (input) => {
-        const result = service.prepareEventDraft(input)
-        if (!result.ok) return webMcpError(result.error.code, result.error.message)
-
-        activeEventDraftRef.current = result.data
-        setActiveEventDraft(result.data)
-        setIsCreatingEvent(true)
-        setOperationsAnnouncement(`${result.data.name || 'Event'} draft ready for review.`)
-        requestAnimationFrame(() => document.getElementById('event-creation')?.scrollIntoView({ block: 'start' }))
-        return webMcpResult(
-          `Draft ${result.data.id} is ready for review. No event has been created.`,
-          {
-            ok: true,
-            draft: result.data,
-            warnings: result.data.warnings,
-            persisted: false,
+    const isEventList = operationsOrganisationId === null && operationsEventId === null
+    const tools = isEventList
+      ? createEventPreparationTools({
+          listEvents: () => {
+            const snapshot = service.getSnapshot()
+            if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
+            const events = getManagedEvents(snapshot.data)
+            return webMcpResult(`Found ${events.length} events.`, { ok: true, events })
           },
-        )
-      },
-      confirmEventCreation: (draftId) => {
-        const draft = activeEventDraftRef.current
-        if (!draft || draft.id !== draftId) {
-          return webMcpError('stale_event_draft', 'The matching event draft is no longer active.')
-        }
+          createEventDraft: (input) => {
+            const result = service.prepareEventDraft(input)
+            if (!result.ok) return webMcpError(result.error.code, result.error.message)
 
-        const organisationName = organisationsById.get(draft.organisationId)?.name ?? 'this organisation'
-        if (!window.confirm(`Create “${draft.name}” for ${organisationName}?`)) {
-          return webMcpError('confirmation_declined', 'Event creation was not confirmed.')
-        }
-
-        const result = service.confirmEventDraft({ draft, actor: demoToolActor })
-        if (!result.ok) return webMcpError(result.error.code, result.error.message)
-
-        activeEventDraftRef.current = null
-        setActiveEventDraft(null)
-        setIsCreatingEvent(false)
-        setOperationsAnnouncement(`${result.data.event.name} created.`)
-        return webMcpResult(
-          `${result.data.event.name} was created.`,
-          {
-            ok: true,
-            event: result.data.event,
-            revision: result.data.snapshot.revision,
+            activeEventDraftRef.current = result.data
+            setActiveEventDraft(result.data)
+            setIsCreatingEvent(true)
+            setOperationsAnnouncement(`${result.data.name || 'Event'} draft ready for review.`)
+            requestAnimationFrame(() => document.getElementById('event-creation')?.scrollIntoView({ block: 'start' }))
+            return webMcpResult(
+              `Draft ${result.data.id} is ready for review. No event has been created.`,
+              {
+                ok: true,
+                draft: result.data,
+                warnings: result.data.warnings,
+                persisted: false,
+              },
+            )
           },
-        )
-      },
-    }, demoOrganisations.map((organisation) => organisation.id))
+          confirmEventCreation: (draftId) => {
+            const draft = activeEventDraftRef.current
+            if (!draft || draft.id !== draftId) {
+              return webMcpError('stale_event_draft', 'The matching event draft is no longer active.')
+            }
 
-    void Promise.all(tools.map((tool) => modelContext.registerTool(tool, {
-      signal: controller.signal,
-    }))).catch(() => undefined)
+            const organisationName = organisationsById.get(draft.organisationId)?.name ?? 'this organisation'
+            if (!window.confirm(`Create “${draft.name}” for ${organisationName}?`)) {
+              return webMcpError('confirmation_declined', 'Event creation was not confirmed.')
+            }
 
-    return () => controller.abort()
+            const result = service.confirmEventDraft({ draft, actor: demoToolActor })
+            if (!result.ok) return webMcpError(result.error.code, result.error.message)
+
+            activeEventDraftRef.current = null
+            setActiveEventDraft(null)
+            setIsCreatingEvent(false)
+            setOperationsAnnouncement(`${result.data.event.name} created.`)
+            return webMcpResult(
+              `${result.data.event.name} was created.`,
+              {
+                ok: true,
+                event: result.data.event,
+                revision: result.data.snapshot.revision,
+              },
+            )
+          },
+        }, demoOrganisations.map((organisation) => organisation.id))
+      : createEventContextTools(() => {
+          const snapshot = service.getSnapshot()
+          if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
+          const event = getManagedEvents(snapshot.data).find((item) => (
+            item.id === operationsEventId && item.organisationId === operationsOrganisationId
+          ))
+          if (!event) return webMcpError('stale_event_context', 'The active event is no longer available.')
+          return webMcpResult(`${event.name} is the active event.`, {
+            ok: true,
+            event: {
+              eventId: event.id,
+              organisationId: event.organisationId,
+              organisationName: event.organisationName,
+              organisationLocation: event.organisationLocation,
+              name: event.name,
+              venue: event.venue,
+            },
+          })
+        })
+
+    const registration = registerWebMcpTools(tools)
+    void registration.ready.catch(() => undefined)
+    return registration.unregister
   }, [operationsEventId, operationsOrganisationId, service, surface])
 
   const openEvent = (item: DemoEvent) => {
@@ -1455,6 +1484,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           <div><img src="/attendly-logo.png" alt="Attendly" /><p>Simple event sign-ups and door check-in for community organisers.</p></div>
           <div className="footer-links"><button type="button" onClick={showDirectory}>Browse organisations</button><button type="button" onClick={showHowItWorks}>How it works</button></div>
         </div>
+        {!webMcpSupported ? <p className="webmcp-compatibility">{webMcpCompatibilityGuidance}</p> : null}
       </footer>
 
       {selectedEvent ? (
@@ -1464,7 +1494,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             {bookingStage === 'event' ? (
               <div className="dialog-content">
                 <span className="type-label">{selectedEvent.category}</span>
-                <div><p className="dialog-owner">Hosted by {selectedOrganisation?.name}</p><h2 id="dialog-title">{selectedEvent.name}</h2></div>
+                <div><p className="dialog-owner">Hosted by {selectedOrganisation ? formatOrganisationContext(selectedOrganisation) : ''}</p><h2 id="dialog-title">{selectedEvent.name}</h2></div>
                 <p className="dialog-intro">{selectedEvent.description}</p>
                 <dl className="detail-list">
                   <div><dt><Icon name="calendar" /> Date</dt><dd>{selectedEvent.dateLabel}</dd></div>
@@ -1490,7 +1520,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
                 <button className="back-button" type="button" onClick={() => setBookingStage('details')}>← Change details</button>
                 <div><p className="step-label">Review</p><h2 id="dialog-title">Check your booking</h2><p className="dialog-intro">Nothing is booked until you confirm below.</p></div>
                 <dl className="booking-review">
-                  <div><dt>Organisation</dt><dd>{selectedOrganisation?.name}</dd></div><div><dt>Event</dt><dd>{selectedEvent.name}</dd></div><div><dt>Date</dt><dd>{selectedEvent.dateLabel}, {selectedEvent.timeLabel}</dd></div><div><dt>Places</dt><dd>{ticketCount}</dd></div><div><dt>Booked by</dt><dd>{bookingName}</dd></div><div><dt>Confirmation</dt><dd>{bookingEmail}</dd></div><div><dt>Total</dt><dd>£0.00</dd></div>
+                  <div><dt>Organisation</dt><dd>{selectedOrganisation ? formatOrganisationContext(selectedOrganisation) : ''}</dd></div><div><dt>Event</dt><dd>{selectedEvent.name}</dd></div><div><dt>Date</dt><dd>{selectedEvent.dateLabel}, {selectedEvent.timeLabel}</dd></div><div><dt>Places</dt><dd>{ticketCount}</dd></div><div><dt>Booked by</dt><dd>{bookingName}</dd></div><div><dt>Confirmation</dt><dd>{bookingEmail}</dd></div><div><dt>Total</dt><dd>£0.00</dd></div>
                 </dl>
                 <button className="button button-primary button-wide" type="button" onClick={() => setBookingStage('confirmed')}>Confirm free booking</button>
               </div>
