@@ -1,6 +1,7 @@
 import {
   calculateAttendanceAnomalies,
   checkInAttendee as applyCheckIn,
+  closeAccountabilitySession as applyAccountabilityClose,
   confirmEventDraft as applyEventCreation,
   getAccountabilitySnapshot,
   getEventLastUpdatedAt,
@@ -35,6 +36,7 @@ export type EventOperation =
   | 'check-in-attendee'
   | 'start-accountability'
   | 'record-accountability-status'
+  | 'close-accountability'
   | 'reset-demo'
 
 export type EventOperationsServiceErrorCode =
@@ -82,7 +84,28 @@ export type EventOperationsServiceSnapshot = {
   readonly anomalies: readonly AttendanceAnomaly[]
   readonly activityTimeline: readonly ActivityEntry[]
   readonly activeAccountability: AccountabilitySnapshot | null
+  readonly accountabilitySession: AccountabilitySessionView | null
   readonly createdEvents: readonly CreatedEvent[]
+}
+
+export type AccountabilitySessionView = {
+  readonly sessionId: string
+  readonly status: 'active' | 'closed'
+  readonly startedAt: string
+  readonly startedBy: OperationsActor
+  readonly updatedAt: string
+  readonly closedAt: string | null
+  readonly closedBy: OperationsActor | null
+  readonly totals: AccountabilitySnapshot
+  readonly records: readonly {
+    readonly attendeeId: string
+    readonly attendeeName: string
+    readonly status: AccountabilityStatus
+    readonly hasRecordedStatus: boolean
+    readonly updatedAt: string
+    readonly updatedBy: OperationsActor
+    readonly note: string | null
+  }[]
 }
 
 export type EventOperationsMutationResult = {
@@ -117,6 +140,10 @@ export type RecordAccountabilityStatusRequest = {
   readonly note?: string
 }
 
+export type CloseAccountabilityRequest = {
+  readonly actor: OperationsActor
+}
+
 export type ResetDemoRequest = {
   readonly actor: OperationsActor
 }
@@ -147,6 +174,7 @@ export type EventOperationsService = {
   recordAccountabilityStatus(
     request: RecordAccountabilityStatusRequest,
   ): EventOperationsServiceResult<EventOperationsMutationResult>
+  closeAccountability(request: CloseAccountabilityRequest): EventOperationsServiceResult<EventOperationsMutationResult>
   resetDemo(request: ResetDemoRequest): EventOperationsServiceResult<EventOperationsServiceSnapshot>
   subscribe(listener: (snapshot: EventOperationsServiceSnapshot) => void): () => void
 }
@@ -234,6 +262,7 @@ function toSnapshot(
 ): EventOperationsServiceSnapshot {
   const eventSnapshot = getEventSnapshot(persisted.state)
   const anomalies = calculateAttendanceAnomalies(persisted.state)
+  const accountabilitySession = toAccountabilitySessionView(persisted.state)
 
   return {
     revision: persisted.revision,
@@ -258,10 +287,48 @@ function toSnapshot(
       : { ...anomaly }),
     activityTimeline: listActivityTimeline(persisted.state, additionalActivityEntries)
       .filter((entry) => entry.eventId === persisted.state.event.id),
-    activeAccountability: getAccountabilitySnapshot(persisted.state),
+    activeAccountability: accountabilitySession?.status === 'active' ? accountabilitySession.totals : null,
+    accountabilitySession,
     createdEvents: persisted.state.createdEvents.map((event) => ({
       ...event,
       createdBy: { ...event.createdBy },
+    })),
+  }
+}
+
+function toAccountabilitySessionView(state: EventOperationsState): AccountabilitySessionView | null {
+  const session = state.accountabilitySession
+  const totals = getAccountabilitySnapshot(state)
+  if (!session || !totals) return null
+  const attendeesById = new Map(state.attendees.map((attendee) => [attendee.id, attendee]))
+  const timestamps = [
+    session.startedAt,
+    ...(session.closedAt ? [session.closedAt] : []),
+    ...session.records.map((record) => record.updatedAt),
+  ]
+  const updatedAt = timestamps.reduce((latest, timestamp) => (
+    Date.parse(timestamp) > Date.parse(latest) ? timestamp : latest
+  ), session.startedAt)
+
+  return {
+    sessionId: session.id,
+    status: session.status,
+    startedAt: session.startedAt,
+    startedBy: { ...session.startedBy },
+    updatedAt,
+    closedAt: session.closedAt ?? null,
+    closedBy: session.closedBy ? { ...session.closedBy } : null,
+    totals,
+    records: session.records.map((record) => ({
+      attendeeId: record.attendeeId,
+      attendeeName: attendeesById.get(record.attendeeId)?.name ?? record.attendeeId,
+      status: record.status,
+      hasRecordedStatus: state.activityEntries.some((entry) => (
+        entry.action === 'accountability-status-recorded' && entry.targetId === record.attendeeId
+      )),
+      updatedAt: record.updatedAt,
+      updatedBy: { ...record.updatedBy },
+      note: record.note ?? null,
     })),
   }
 }
@@ -576,6 +643,41 @@ export function createEventOperationsService(
             ? { toolName: 'record_accountability_status' }
             : {}),
           ...(request.note ? { note: request.note } : {}),
+        })
+        return failure(error)
+      }
+    },
+    closeAccountability(request) {
+      const occurredAt = options.now()
+      const activityId = options.createId('activity')
+      let eventId = 'event'
+      let sessionId = 'accountability-session'
+      try {
+        requireAuthorised(options, request.actor, 'close-accountability')
+        const updated = options.store.update((state) => {
+          eventId = state.event.id
+          const session = state.accountabilitySession
+          if (!session || session.status !== 'active') reject(errors.accountabilityNotActive())
+          sessionId = session.id
+          const transition = applyAccountabilityClose(state, {
+            activityId,
+            closedAt: occurredAt,
+            actor: request.actor,
+          })
+          return { state: transition.state, value: transition.activityEntry }
+        })
+
+        return mutationResult(updated.persisted, updated.value)
+      } catch (error) {
+        recordFailedWrite(error, {
+          id: activityId,
+          eventId,
+          action: 'accountability-closed',
+          targetId: sessionId,
+          targetLabel: 'Evacuation accountability',
+          actor: request.actor,
+          occurredAt,
+          resultSummary: 'Accountability closure was not saved.',
         })
         return failure(error)
       }

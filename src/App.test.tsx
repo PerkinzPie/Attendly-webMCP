@@ -510,6 +510,72 @@ describe('Attendly organisation directory', () => {
     ))).toHaveLength(1)
   })
 
+  it('provides a one-click roll check with optional notes and auditable corrections', () => {
+    const service = createTestOperationsService()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App operationsService={service} />)
+    openManagedEvent()
+
+    let workspace = screen.getByRole('region', { name: 'Roll call' })
+    expect(within(workspace).getByText('0 of 13').parentElement).toHaveTextContent('0 of 13 accounted for')
+    expect(within(workspace).getByRole('button', { name: 'Show roll call' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(workspace).queryByRole('checkbox')).not.toBeInTheDocument()
+
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Show roll call' }))
+
+    expect(within(workspace).getByText('Tick each person at the assembly point.')).toBeInTheDocument()
+    expect(within(workspace).getAllByRole('checkbox')).toHaveLength(13)
+    expect(within(workspace).queryByText('Sarah Jenkins')).not.toBeInTheDocument()
+
+    let aminaRow = within(workspace).getByText('Amina Patel').closest('li')
+    expect(aminaRow).not.toBeNull()
+    fireEvent.click(within(aminaRow as HTMLElement).getByRole('checkbox', { name: 'Amina Patel' }))
+
+    workspace = screen.getByRole('region', { name: 'Roll call' })
+    expect(within(workspace).getByText('1 of 13').parentElement).toHaveTextContent('1 of 13 accounted for')
+    aminaRow = within(workspace).getByText('Amina Patel').closest('li')
+    expect(confirm).not.toHaveBeenCalled()
+    expect(within(aminaRow as HTMLElement).getByRole('checkbox', { name: 'Amina Patel' })).toBeChecked()
+
+    expect(within(aminaRow as HTMLElement).queryByLabelText('Note for Amina Patel')).not.toBeInTheDocument()
+    fireEvent.click(within(aminaRow as HTMLElement).getByRole('button', { name: 'Add note for Amina Patel' }))
+    fireEvent.change(within(aminaRow as HTMLElement).getByLabelText('Note for Amina Patel'), {
+      target: { value: 'At the east assembly point.' },
+    })
+    fireEvent.click(within(aminaRow as HTMLElement).getByRole('button', { name: 'Save note' }))
+    expect(within(aminaRow as HTMLElement).queryByLabelText('Note for Amina Patel')).not.toBeInTheDocument()
+
+    workspace = screen.getByRole('region', { name: 'Roll call' })
+    aminaRow = within(workspace).getByText('Amina Patel').closest('li')
+    expect(aminaRow).toHaveTextContent('At the east assembly point.')
+
+    fireEvent.click(within(aminaRow as HTMLElement).getByRole('checkbox', { name: /Amina Patel/ }))
+
+    expect(confirm).toHaveBeenNthCalledWith(
+      1,
+      'Change Amina Patel from Accounted for to Unconfirmed? The earlier update will remain in Activity.',
+    )
+    workspace = screen.getByRole('region', { name: 'Roll call' })
+    expect(within(workspace).getByText('0 of 13').parentElement).toHaveTextContent('0 of 13 accounted for')
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Hide roll call' }))
+    expect(within(workspace).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(service.getSnapshot()).toMatchObject({
+      ok: true,
+      data: {
+        activeAccountability: { total: 13, accountedFor: 0, unconfirmed: 13 },
+        accountabilitySession: {
+          status: 'active',
+          totals: { total: 13, accountedFor: 0, unconfirmed: 13 },
+          records: expect.arrayContaining([expect.objectContaining({
+            attendeeId: 'att_amina_patel',
+            status: 'unconfirmed',
+            note: 'At the east assembly point.',
+          })]),
+        },
+      },
+    })
+  })
+
   it('lists and filters events across organisations while preserving their context', () => {
     render(<App operationsService={createTestOperationsService()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))

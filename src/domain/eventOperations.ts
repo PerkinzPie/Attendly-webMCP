@@ -50,7 +50,7 @@ export type CapacityRule = {
 export type ActivityEntry = {
   readonly id: string
   readonly eventId: string
-  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded' | 'event-created' | 'demo-reset'
+  readonly action: 'attendee-checked-in' | 'accountability-started' | 'accountability-status-recorded' | 'accountability-closed' | 'event-created' | 'demo-reset'
   readonly targetId: string
   readonly targetLabel: string
   readonly actor: OperationsActor
@@ -113,9 +113,11 @@ export type AccountabilityRecord = {
 export type AccountabilitySession = {
   readonly id: string
   readonly eventId: string
-  readonly status: 'active'
+  readonly status: 'active' | 'closed'
   readonly startedAt: string
   readonly startedBy: OperationsActor
+  readonly closedAt?: string
+  readonly closedBy?: OperationsActor
   readonly records: readonly AccountabilityRecord[]
   readonly isSynthetic: true
 }
@@ -269,6 +271,13 @@ export type RecordAccountabilityCommand = {
   readonly note?: string
 }
 
+export type CloseAccountabilityCommand = {
+  readonly activityId: string
+  readonly closedAt: string
+  readonly actor: OperationsActor
+  readonly toolName?: string
+}
+
 export type PrepareEventDraftCommand = {
   readonly draftId: string
   readonly preparedAt: string
@@ -360,6 +369,13 @@ function validateState(state: EventOperationsState) {
   if (!session) return
 
   invariant(session.eventId === state.event.id, 'Accountability session belongs to another event')
+  invariant(!Number.isNaN(Date.parse(session.startedAt)), 'Accountability session start time must be valid')
+  if (session.status === 'closed') {
+    invariant(session.closedAt && !Number.isNaN(Date.parse(session.closedAt)), 'Accountability session close time must be valid')
+    invariant(session.closedBy, 'A closed accountability session must identify who closed it')
+  } else {
+    invariant(!session.closedAt && !session.closedBy, 'An active accountability session cannot have closure details')
+  }
   invariant(new Set(session.records.map((record) => record.attendeeId)).size === session.records.length, 'Accountability attendees must be unique')
   for (const record of session.records) {
     invariant(checkedInAttendeeIds.has(record.attendeeId), `Accountability attendee ${record.attendeeId} was not checked in`)
@@ -390,6 +406,9 @@ export function createEventOperationsState(input: EventOperationsStateInput): Ev
     accountabilitySession: input.accountabilitySession ? {
       ...input.accountabilitySession,
       startedBy: cloneActor(input.accountabilitySession.startedBy),
+      ...(input.accountabilitySession.closedBy
+        ? { closedBy: cloneActor(input.accountabilitySession.closedBy) }
+        : {}),
       records: input.accountabilitySession.records.map((record) => ({
         ...record,
         updatedBy: cloneActor(record.updatedBy),
@@ -504,6 +523,7 @@ export function getEventLastUpdatedAt(state: EventOperationsState): string | nul
       .map((entry) => entry.occurredAt),
     ...(state.accountabilitySession ? [
       state.accountabilitySession.startedAt,
+      ...(state.accountabilitySession.closedAt ? [state.accountabilitySession.closedAt] : []),
       ...state.accountabilitySession.records.map((record) => record.updatedAt),
     ] : []),
   ]
@@ -826,6 +846,7 @@ export function recordAccountabilityStatus(
 ): OperationsTransition {
   const session = state.accountabilitySession
   invariant(session, 'No accountability session is active')
+  invariant(session.status === 'active', 'The accountability session is closed')
   invariant(session.records.some((record) => record.attendeeId === command.attendeeId), 'Attendee is not part of the active accountability session')
 
   const records = session.records.map((record): AccountabilityRecord => record.attendeeId === command.attendeeId ? {
@@ -864,6 +885,48 @@ export function recordAccountabilityStatus(
   })
   const accountabilitySnapshot = getAccountabilitySnapshot(nextState)
   invariant(accountabilitySnapshot, 'Accountability totals were not recalculated')
+
+  return {
+    state: nextState,
+    eventSnapshot: getEventSnapshot(nextState),
+    accountabilitySnapshot,
+    activityEntry,
+  }
+}
+
+export function closeAccountabilitySession(
+  state: EventOperationsState,
+  command: CloseAccountabilityCommand,
+): OperationsTransition {
+  const session = state.accountabilitySession
+  invariant(session, 'No accountability session is active')
+  invariant(session.status === 'active', 'The accountability session is already closed')
+
+  const accountabilitySnapshot = getAccountabilitySnapshot(state)
+  invariant(accountabilitySnapshot, 'Accountability totals are unavailable')
+  const activityEntry: ActivityEntry = {
+    id: command.activityId,
+    eventId: state.event.id,
+    action: 'accountability-closed',
+    targetId: session.id,
+    targetLabel: 'Evacuation accountability',
+    actor: cloneActor(command.actor),
+    occurredAt: command.closedAt,
+    outcome: 'succeeded',
+    resultSummary: `Closed · ${accountabilitySnapshot.unconfirmed} unconfirmed.`,
+    ...(command.toolName ? { toolName: command.toolName } : {}),
+    isSynthetic: true,
+  }
+  const nextState = createEventOperationsState({
+    ...state,
+    activityEntries: [...state.activityEntries, activityEntry],
+    accountabilitySession: {
+      ...session,
+      status: 'closed',
+      closedAt: command.closedAt,
+      closedBy: cloneActor(command.actor),
+    },
+  })
 
   return {
     state: nextState,

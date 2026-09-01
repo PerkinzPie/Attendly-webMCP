@@ -7,6 +7,7 @@ import type {
   EventOperationsServiceSnapshot,
 } from './application/eventOperationsService'
 import type {
+  AccountabilityStatus,
   ActivityEntry,
   AttendanceAnomaly,
   AttendeeCheckInReview,
@@ -38,7 +39,7 @@ import { createEventContextTools } from './webmcp/eventContextTools'
 import { createEventReadTools } from './webmcp/eventReadTools'
 import { createAttendeeCheckInTool } from './webmcp/attendeeCheckInTool'
 
-type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' | 'refresh' | 'search' | 'ticket'
+type IconName = 'arrow' | 'calendar' | 'check' | 'chevron' | 'clock' | 'close' | 'location' | 'note' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
 type OrganisationFilter = 'All organisations' | OrganisationType
 type EventFilter = 'All events' | EventCategory
@@ -101,9 +102,11 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     arrow: <path d="M5 12h14m-5-5 5 5-5 5" />,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
     check: <path d="m5 12 4 4L19 6" />,
+    chevron: <path d="m6 9 6 6 6-6" />,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     location: <><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></>,
+    note: <><path d="M6 3h9l3 3v15H6Z" /><path d="M15 3v4h3M9 11h6M9 15h6" /></>,
     refresh: <><path d="M20 11a8 8 0 1 0-2.34 5.66" /><path d="M20 5v6h-6" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
     ticket: <path d="M4 6h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4V7a1 1 0 0 1 1-1Z" />,
@@ -227,6 +230,7 @@ function getActivityActionLabel(action: ActivityEntry['action']) {
     'attendee-checked-in': 'Attendee checked in',
     'accountability-started': 'Accountability started',
     'accountability-status-recorded': 'Accountability updated',
+    'accountability-closed': 'Accountability closed',
     'event-created': 'Event created',
     'demo-reset': 'Demo reset',
   }
@@ -658,6 +662,180 @@ function EventNotFound({
   )
 }
 
+function accountabilityStatusLabel(status: AccountabilityStatus) {
+  if (status === 'accounted-for') return 'Accounted for'
+  if (status === 'exempt-not-present') return 'Not present'
+  return 'Unconfirmed'
+}
+
+function AccountabilityWorkspace({
+  snapshot,
+  attendees,
+  onStartAccountability,
+  onRecordAccountabilityStatus,
+}: {
+  snapshot: EventOperationsServiceSnapshot
+  attendees: readonly AttendeeSearchResult[]
+  onStartAccountability: EventOperationsService['startAccountability']
+  onRecordAccountabilityStatus: EventOperationsService['recordAccountabilityStatus']
+}) {
+  const session = snapshot.accountabilitySession
+  const checkedInAttendees = attendees.filter((attendee) => attendee.checkIn.status === 'checked-in')
+  const rollCallRecords = session?.records ?? checkedInAttendees.map((attendee) => ({
+    attendeeId: attendee.attendeeId,
+    attendeeName: attendee.name,
+    status: 'unconfirmed' as const,
+    note: null,
+  }))
+  const accountedFor = session?.totals.accountedFor ?? 0
+  const expected = session?.totals.total ?? checkedInAttendees.length
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [noteEditor, setNoteEditor] = useState<{
+    attendeeId: string
+    note: string
+  } | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
+
+  const recordStatus = (attendeeId: string, status: AccountabilityStatus, note?: string | null) => {
+    let activeSession = session?.status === 'active' ? session : null
+    if (!activeSession) {
+      const startResult = onStartAccountability({ actor: demoUiActor })
+      if (!startResult.ok) {
+        setFeedback(startResult.error.message)
+        return false
+      }
+      activeSession = startResult.data.snapshot.accountabilitySession
+    }
+    const record = activeSession?.records.find((item) => item.attendeeId === attendeeId)
+    if (!record) return
+    if (record.status !== 'unconfirmed' && record.status !== status && !window.confirm(
+      `Change ${record.attendeeName} from ${accountabilityStatusLabel(record.status)} to ${accountabilityStatusLabel(status)}? The earlier update will remain in Activity.`,
+    )) return false
+
+    const result = onRecordAccountabilityStatus({
+      attendeeId: record.attendeeId,
+      status,
+      actor: demoUiActor,
+      ...(note?.trim() ? { note: note.trim() } : {}),
+    })
+    if (!result.ok) {
+      setFeedback(result.error.message)
+      return false
+    }
+    setNoteEditor(null)
+    setFeedback(null)
+    return true
+  }
+
+  const saveNote = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!noteEditor) return
+    const record = rollCallRecords.find((item) => item.attendeeId === noteEditor.attendeeId)
+    if (!record) return
+    recordStatus(record.attendeeId, record.status, noteEditor.note)
+  }
+
+  return (
+    <section className={`accountability-workspace ${isExpanded ? 'expanded' : ''}`} aria-label="Roll call">
+      <h2 className="accountability-heading">
+        <button
+          type="button"
+          aria-controls="roll-call-list"
+          aria-expanded={isExpanded}
+          aria-label={`${isExpanded ? 'Hide' : 'Show'} roll call`}
+          onClick={() => {
+            setIsExpanded(!isExpanded)
+            if (isExpanded) setNoteEditor(null)
+          }}
+        >
+          <span className="accountability-title">Roll call</span>
+          <span className="accountability-summary"><strong>{accountedFor} of {expected}</strong> accounted for</span>
+          <Icon name="chevron" size={18} />
+        </button>
+      </h2>
+
+      {feedback ? (
+        <p className="accountability-feedback" role="alert">{feedback}</p>
+      ) : null}
+
+      {isExpanded ? rollCallRecords.length > 0 ? (
+        <div id="roll-call-list" className="accountability-content">
+          <p className="accountability-instruction">Tick each person at the assembly point.</p>
+          <ul className="accountability-list">
+            {rollCallRecords.map((record) => {
+              const isEditingNote = noteEditor?.attendeeId === record.attendeeId
+              const isAccountedFor = record.status === 'accounted-for'
+              const nextStatus: AccountabilityStatus = isAccountedFor ? 'unconfirmed' : 'accounted-for'
+              const toggleLabel = isAccountedFor
+                ? `Mark ${record.attendeeName} unconfirmed`
+                : `Mark ${record.attendeeName} accounted for`
+              return (
+                <li key={record.attendeeId}>
+                  <div className="accountability-record">
+                    <label className="accountability-check-control" title={toggleLabel}>
+                      <input
+                        type="checkbox"
+                        checked={isAccountedFor}
+                        disabled={session?.status === 'closed'}
+                        onChange={() => recordStatus(record.attendeeId, nextStatus, record.note)}
+                      />
+                      <span className="accountability-person">
+                        <strong>{record.attendeeName}</strong>
+                        {record.note ? <span>{record.note}</span> : null}
+                      </span>
+                    </label>
+                    <div className="accountability-record-actions">
+                      {record.status === 'exempt-not-present' ? (
+                        <span className="accountability-status exempt-not-present">Not present</span>
+                      ) : null}
+                      {session?.status !== 'closed' ? (
+                        <button
+                          className={`icon-button accountability-note-button ${record.note ? 'has-note' : ''}`}
+                          type="button"
+                          aria-label={`${record.note ? 'Edit' : 'Add'} note for ${record.attendeeName}`}
+                          aria-controls={`accountability-note-${record.attendeeId}`}
+                          aria-expanded={isEditingNote}
+                          title={`${record.note ? 'Edit' : 'Add'} note`}
+                          onClick={() => {
+                            setNoteEditor(isEditingNote ? null : {
+                              attendeeId: record.attendeeId,
+                              note: record.note ?? '',
+                            })
+                            setFeedback(null)
+                          }}
+                        >
+                          <Icon name="note" size={19} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {isEditingNote && noteEditor ? (
+                    <form id={`accountability-note-${record.attendeeId}`} className="accountability-note-form" onSubmit={saveNote}>
+                      <label>
+                        <span className="sr-only">Note for {record.attendeeName}</span>
+                        <input
+                          aria-label={`Note for ${record.attendeeName}`}
+                          placeholder="Add a note"
+                          value={noteEditor.note}
+                          onChange={(event) => setNoteEditor({ ...noteEditor, note: event.target.value })}
+                        />
+                      </label>
+                      <button className="button button-secondary" type="submit">Save note</button>
+                    </form>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ) : (
+        <p id="roll-call-list" className="accountability-empty">No one is checked in.</p>
+      ) : null}
+    </section>
+  )
+}
+
 function OperationsWorkspace({
   snapshot,
   organisation,
@@ -672,6 +850,8 @@ function OperationsWorkspace({
   onCheckInAttendee,
   checkInReview,
   onCheckInReviewChange,
+  onStartAccountability,
+  onRecordAccountabilityStatus,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
   organisation: DemoOrganisation
@@ -686,17 +866,23 @@ function OperationsWorkspace({
   onCheckInAttendee: EventOperationsService['checkInAttendee']
   checkInReview: AttendeeCheckInReview | null
   onCheckInReviewChange: (review: AttendeeCheckInReview | null) => void
+  onStartAccountability: EventOperationsService['startAccountability']
+  onRecordAccountabilityStatus: EventOperationsService['recordAccountabilityStatus']
 }) {
   const [attendeeQuery, setAttendeeQuery] = useState('')
   const [expandedAttendeeId, setExpandedAttendeeId] = useState<string | null>(null)
   const [checkInFeedback, setCheckInFeedback] = useState<{ type: 'error' | 'success', message: string } | null>(null)
   const attendeeSearchRef = useRef<HTMLInputElement>(null)
   const trimmedAttendeeQuery = attendeeQuery.trim()
+  const allAttendeeListResult = onListAttendees()
   const attendeeListResult = trimmedAttendeeQuery
     ? onSearchAttendees(trimmedAttendeeQuery)
-    : onListAttendees()
+    : allAttendeeListResult
   const attendeeResults: readonly AttendeeSearchResult[] = attendeeListResult.ok
     ? attendeeListResult.data
+    : []
+  const allAttendees: readonly AttendeeSearchResult[] = allAttendeeListResult.ok
+    ? allAttendeeListResult.data
     : []
   const attendeeCountLabel = `${attendeeResults.length} ${trimmedAttendeeQuery
     ? attendeeResults.length === 1 ? 'match' : 'matches'
@@ -795,6 +981,13 @@ function OperationsWorkspace({
               <div><dt>Not arrived</dt><dd>{snapshot.notArrivedCount}</dd></div>
               <div><dt>Capacity remaining</dt><dd>{snapshot.capacityRemaining}</dd></div>
             </dl>
+
+            <AccountabilityWorkspace
+              snapshot={snapshot}
+              attendees={allAttendees}
+              onStartAccountability={onStartAccountability}
+              onRecordAccountabilityStatus={onRecordAccountabilityStatus}
+            />
 
             <section className="event-anomalies" aria-labelledby="event-anomalies-title">
               <div className="event-anomalies-heading">
@@ -1606,6 +1799,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               onCheckInAttendee={service.checkInAttendee}
               checkInReview={activeCheckInReview}
               onCheckInReviewChange={setActiveCheckInReview}
+              onStartAccountability={service.startAccountability}
+              onRecordAccountabilityStatus={service.recordAccountabilityStatus}
             />
           ) : operationsOrganisation && createdEventContext ? (
             <EventOverviewWorkspace

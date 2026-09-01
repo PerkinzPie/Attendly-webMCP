@@ -3,6 +3,7 @@ import { createDemoEventOperationsState } from '../demo/seed'
 import {
   calculateAttendanceAnomalies,
   checkInAttendee,
+  closeAccountabilitySession,
   confirmEventDraft,
   createEventOperationsState,
   getAccountabilitySnapshot,
@@ -424,6 +425,49 @@ describe('event operations domain', () => {
       resultSummary: 'Accounted for · 1 of 13 accounted for.',
     })
     expect(transition.state.activityEntries).toHaveLength(2)
+  })
+
+  it('closes accountability without rewriting attendee records', () => {
+    const started = startSession()
+    const recorded = recordAccountabilityStatus(started.state, {
+      attendeeId: 'att_amina_patel',
+      status: 'accounted-for',
+      activityId: 'act_amina_accounted_001',
+      recordedAt: '2026-09-05T18:24:00+01:00',
+      actor: organiser,
+      note: 'At the assembly point.',
+    })
+    const recordsBeforeClose = recorded.state.accountabilitySession?.records
+
+    const closed = closeAccountabilitySession(recorded.state, {
+      activityId: 'act_accountability_closed_001',
+      closedAt: '2026-09-05T18:30:00+01:00',
+      actor: organiser,
+    })
+
+    expect(closed.state.accountabilitySession).toMatchObject({
+      status: 'closed',
+      closedAt: '2026-09-05T18:30:00+01:00',
+      closedBy: organiser,
+    })
+    expect(closed.state.accountabilitySession?.records).toEqual(recordsBeforeClose)
+    expect(closed.accountabilitySnapshot).toMatchObject({
+      total: 13,
+      accountedFor: 1,
+      unconfirmed: 12,
+    })
+    expect(closed.activityEntry).toMatchObject({
+      action: 'accountability-closed',
+      targetId: 'acc_riverside_001',
+      resultSummary: 'Closed · 12 unconfirmed.',
+    })
+    expect(() => recordAccountabilityStatus(closed.state, {
+      attendeeId: 'att_amina_patel',
+      status: 'unconfirmed',
+      activityId: 'act_late_correction',
+      recordedAt: '2026-09-05T18:31:00+01:00',
+      actor: organiser,
+    })).toThrow('The accountability session is closed')
   })
 
   it('returns an immutable activity timeline in deterministic reverse chronological order', () => {

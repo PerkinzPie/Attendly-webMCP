@@ -143,6 +143,7 @@ describe('event operations application service', () => {
       ],
       activityTimeline: [],
       activeAccountability: null,
+      accountabilitySession: null,
       createdEvents: [],
     })
     expect(JSON.parse(JSON.stringify(result.data))).toEqual(result.data)
@@ -427,6 +428,72 @@ describe('event operations application service', () => {
       { revision: 1, unconfirmed: 13 },
       { revision: 2, unconfirmed: 12 },
     ])
+  })
+
+  it('projects accountability rows, corrections and a closed session without losing history', () => {
+    const memory = createMemoryStorage()
+    const store = createStore(memory.storage)
+    const service = createService(store)
+
+    expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
+    expect(service.recordAccountabilityStatus({
+      attendeeId: 'att_amina_patel',
+      status: 'accounted-for',
+      actor: organiser,
+      note: 'At the assembly point.',
+    }).ok).toBe(true)
+    expect(service.recordAccountabilityStatus({
+      attendeeId: 'att_amina_patel',
+      status: 'unconfirmed',
+      actor: organiser,
+      note: 'Corrected after a mistaken confirmation.',
+    }).ok).toBe(true)
+
+    const active = service.getSnapshot()
+    expect(active).toMatchObject({
+      ok: true,
+      data: {
+        activeAccountability: { total: 13, accountedFor: 0, unconfirmed: 13 },
+        accountabilitySession: {
+          status: 'active',
+          startedAt: '2026-09-05T18:20:00+01:00',
+          updatedAt: '2026-09-05T18:20:00+01:00',
+          records: expect.arrayContaining([expect.objectContaining({
+            attendeeId: 'att_amina_patel',
+            attendeeName: 'Amina Patel',
+            status: 'unconfirmed',
+            updatedBy: organiser,
+            note: 'Corrected after a mistaken confirmation.',
+            updatedAt: '2026-09-05T18:20:00+01:00',
+          })]),
+        },
+      },
+    })
+
+    const closed = service.closeAccountability({ actor: organiser })
+    expect(closed).toMatchObject({
+      ok: true,
+      data: {
+        snapshot: {
+          activeAccountability: null,
+          accountabilitySession: {
+            status: 'closed',
+            closedAt: '2026-09-05T18:20:00+01:00',
+            closedBy: organiser,
+            totals: { total: 13, accountedFor: 0, unconfirmed: 13 },
+          },
+        },
+        activityEntry: {
+          action: 'accountability-closed',
+          resultSummary: 'Closed · 13 unconfirmed.',
+        },
+      },
+    })
+    const persisted = store.read().state
+    expect(persisted.accountabilitySession?.records).toHaveLength(13)
+    expect(persisted.activityEntries.filter((entry) => (
+      entry.targetId === 'att_amina_patel' && entry.action === 'accountability-status-recorded'
+    ))).toHaveLength(2)
   })
 
   it('returns a stable error without persisting or publishing an invalid change', () => {
