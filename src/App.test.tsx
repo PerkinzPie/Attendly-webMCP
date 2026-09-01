@@ -266,6 +266,7 @@ describe('Attendly organisation directory', () => {
       'get_event_snapshot',
       'find_attendee',
       'get_attendance_anomalies',
+      'check_in_attendee',
     ]))
     await expect(staleListTool?.execute({})).rejects.toMatchObject({ name: 'AbortError' })
     const result = await tools.get('get_event_snapshot')?.execute({ eventId: 'evt_riverside_community_workshop' }) as {
@@ -318,8 +319,11 @@ describe('Attendly organisation directory', () => {
       'get_event_snapshot',
       'find_attendee',
       'get_attendance_anomalies',
+      'check_in_attendee',
     ]))
-    expect([...tools.values()].every((tool) => tool.annotations?.readOnlyHint)).toBe(true)
+    expect(['get_event_snapshot', 'find_attendee', 'get_attendance_anomalies']
+      .every((name) => tools.get(name)?.annotations?.readOnlyHint)).toBe(true)
+    expect(tools.get('check_in_attendee')?.annotations?.readOnlyHint).toBe(false)
     const before = service.getSnapshot()
 
     const snapshotResult = await tools.get('get_event_snapshot')?.execute({
@@ -413,6 +417,97 @@ describe('Attendly organisation directory', () => {
     })
     expect(wrongEventResult.structuredContent.event).toBeUndefined()
     expect(service.getSnapshot()).toEqual(before)
+  })
+
+  it('reviews and confirms a stable attendee check-in exactly once', async () => {
+    const service = createTestOperationsService()
+    const tools = installModelContext()
+    render(<App operationsService={service} />)
+    openManagedEvent()
+
+    await waitFor(() => expect(tools.has('check_in_attendee')).toBe(true))
+    const tool = tools.get('check_in_attendee')
+    const before = service.getSnapshot()
+    const ambiguous = await tool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+      query: 'Sarah Jenkins',
+      reason: 'Unrecognised ticket code',
+    }) as { structuredContent: { error: { code: string, message: string } } }
+
+    expect(ambiguous.structuredContent.error).toEqual({
+      code: 'attendee_id_required',
+      message: 'Use the stable attendee identifier returned by find_attendee; a name or search query is not sufficient.',
+    })
+    const nameAsIdentifier = await tool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+      attendeeId: 'Sarah Jenkins',
+      reason: 'Unrecognised ticket code',
+    }) as { structuredContent: { error: { code: string, message: string } } }
+    expect(nameAsIdentifier.structuredContent.error).toEqual({
+      code: 'attendee_not_found',
+      message: 'Use a stable attendee identifier returned by find_attendee for the active event.',
+    })
+    expect(service.getSnapshot()).toEqual(before)
+
+    const confirm = vi.spyOn(window, 'confirm').mockImplementation(() => {
+      const review = screen.getByRole('group', { name: 'Confirm check-in for Sarah Jenkins' })
+      expect(within(review).getByText('Not arrived · Occupancy 13 → 14 of 20')).toBeInTheDocument()
+      return true
+    })
+    let confirmed: {
+      structuredContent: {
+        idempotent: boolean
+        previousState: { status: string, checkedInAt: string | null }
+        newState: { status: string, checkedInAt: string | null }
+        occupancy: { previous: number, current: number, capacity: number }
+        activityId: string | null
+        revision: number
+      }
+    } | undefined
+
+    await act(async () => {
+      confirmed = await tool?.execute({
+        eventId: 'evt_riverside_community_workshop',
+        attendeeId: 'att_sarah_jenkins',
+        reason: 'Unrecognised ticket code',
+      }) as typeof confirmed
+    })
+
+    expect(confirmed?.structuredContent).toMatchObject({
+      idempotent: false,
+      previousState: { status: 'not-arrived', checkedInAt: null },
+      newState: { status: 'checked-in', checkedInAt: '2026-09-05T18:30:00+01:00' },
+      occupancy: { previous: 13, current: 14, capacity: 20 },
+      activityId: expect.any(String),
+      revision: 1,
+    })
+    const totals = screen.getByLabelText('Current event totals')
+    expect(within(totals).getByText('Checked in').parentElement).toHaveTextContent('14')
+    expect(within(totals).getByText('Not arrived').parentElement).toHaveTextContent('2')
+    const sarahResult = screen.getByRole('heading', { level: 3, name: 'Sarah Jenkins' }).closest('article')
+    expect(sarahResult).not.toBeNull()
+    expect(within(sarahResult as HTMLElement).getByText('Checked in')).toBeInTheDocument()
+    expect(within(sarahResult as HTMLElement).queryByRole('button', { name: 'Check in Sarah Jenkins' })).not.toBeInTheDocument()
+
+    const repeated = await tool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+      attendeeId: 'att_sarah_jenkins',
+      reason: 'Unrecognised ticket code',
+    }) as typeof confirmed
+    expect(repeated?.structuredContent).toMatchObject({
+      idempotent: true,
+      previousState: { status: 'checked-in', checkedInAt: '2026-09-05T18:30:00+01:00' },
+      newState: { status: 'checked-in', checkedInAt: '2026-09-05T18:30:00+01:00' },
+      occupancy: { previous: 14, current: 14, capacity: 20 },
+      activityId: confirmed?.structuredContent.activityId,
+      revision: 1,
+    })
+    expect(confirm).toHaveBeenCalledTimes(1)
+
+    const snapshot = service.getSnapshot()
+    expect(snapshot.ok && snapshot.data.activityTimeline.filter((entry) => (
+      entry.action === 'attendee-checked-in' && entry.targetId === 'att_sarah_jenkins'
+    ))).toHaveLength(1)
   })
 
   it('lists and filters events across organisations while preserving their context', () => {
@@ -514,7 +609,7 @@ describe('Attendly organisation directory', () => {
 
     const confirmation = screen.getByRole('group', { name: 'Confirm check-in for Sarah Jenkins' })
     expect(within(confirmation).getByText('Check in Sarah Jenkins?')).toBeInTheDocument()
-    expect(within(confirmation).getByText('Occupancy 14 of 20')).toBeInTheDocument()
+    expect(within(confirmation).getByText('Not arrived · Occupancy 13 → 14 of 20')).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 13 } })
 
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm check-in' }))

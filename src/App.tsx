@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import './App.css'
 import { getDemoEventOperationsService } from './application/demoEventOperations'
 import type {
@@ -35,6 +36,7 @@ import {
 } from './webmcp/browserAdapter'
 import { createEventContextTools } from './webmcp/eventContextTools'
 import { createEventReadTools } from './webmcp/eventReadTools'
+import { createAttendeeCheckInTool } from './webmcp/attendeeCheckInTool'
 
 type IconName = 'arrow' | 'calendar' | 'check' | 'clock' | 'close' | 'location' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
@@ -668,6 +670,8 @@ function OperationsWorkspace({
   onSearchAttendees,
   onPrepareAttendeeCheckIn,
   onCheckInAttendee,
+  checkInReview,
+  onCheckInReviewChange,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
   organisation: DemoOrganisation
@@ -680,10 +684,11 @@ function OperationsWorkspace({
   onSearchAttendees: EventOperationsService['searchAttendees']
   onPrepareAttendeeCheckIn: EventOperationsService['prepareAttendeeCheckIn']
   onCheckInAttendee: EventOperationsService['checkInAttendee']
+  checkInReview: AttendeeCheckInReview | null
+  onCheckInReviewChange: (review: AttendeeCheckInReview | null) => void
 }) {
   const [attendeeQuery, setAttendeeQuery] = useState('')
   const [expandedAttendeeId, setExpandedAttendeeId] = useState<string | null>(null)
-  const [checkInReview, setCheckInReview] = useState<AttendeeCheckInReview | null>(null)
   const [checkInFeedback, setCheckInFeedback] = useState<{ type: 'error' | 'success', message: string } | null>(null)
   const attendeeSearchRef = useRef<HTMLInputElement>(null)
   const trimmedAttendeeQuery = attendeeQuery.trim()
@@ -701,7 +706,7 @@ function OperationsWorkspace({
 
   const updateAttendeeQuery = (query: string) => {
     setAttendeeQuery(query)
-    setCheckInReview(null)
+    onCheckInReviewChange(null)
     setCheckInFeedback(null)
   }
 
@@ -723,12 +728,12 @@ function OperationsWorkspace({
     })
 
     if (!result.ok) {
-      setCheckInReview(null)
+      onCheckInReviewChange(null)
       setCheckInFeedback({ type: 'error', message: result.error.message })
       return
     }
 
-    setCheckInReview(result.data)
+    onCheckInReviewChange(result.data)
     setCheckInFeedback(null)
   }
 
@@ -742,12 +747,12 @@ function OperationsWorkspace({
 
     if (!result.ok) {
       setCheckInFeedback({ type: 'error', message: result.error.message })
-      setCheckInReview(null)
+      onCheckInReviewChange(null)
       return
     }
 
     setCheckInFeedback({ type: 'success', message: `${checkInReview.attendeeName} checked in.` })
-    setCheckInReview(null)
+    onCheckInReviewChange(null)
   }
 
   return (
@@ -883,6 +888,27 @@ function OperationsWorkspace({
                 </p>
               ) : null}
 
+              {checkInReview ? (
+                <div
+                  className="check-in-confirmation"
+                  id="attendee-check-in-review"
+                  role="group"
+                  aria-label={`Confirm check-in for ${checkInReview.attendeeName}`}
+                >
+                  <div>
+                    <strong>Check in {checkInReview.attendeeName}?</strong>
+                    <span>Not arrived · Occupancy {checkInReview.currentOccupancy} → {checkInReview.projectedOccupancy} of {checkInReview.capacity}</span>
+                  </div>
+                  {checkInReview.capacityWarning ? (
+                    <p className="check-in-capacity-warning">{checkInReview.capacityWarning}</p>
+                  ) : null}
+                  <div className="check-in-confirmation-actions">
+                    <button className="button button-secondary" type="button" onClick={() => onCheckInReviewChange(null)}>Cancel</button>
+                    <button className="button button-primary" type="button" onClick={confirmCheckIn}>Confirm check-in</button>
+                  </div>
+                </div>
+              ) : null}
+
               {attendeeResults.length > 0 ? (
                 <ul className="attendee-results">
                   {attendeeResults.map((attendee) => {
@@ -923,22 +949,6 @@ function OperationsWorkspace({
                               </button>
                             </div>
                           </div>
-
-                          {checkInReview?.attendeeId === attendee.attendeeId ? (
-                            <div className="check-in-confirmation" role="group" aria-label={`Confirm check-in for ${attendee.name}`}>
-                              <div>
-                                <strong>Check in {attendee.name}?</strong>
-                                <span>Occupancy {checkInReview.projectedOccupancy} of {checkInReview.capacity}</span>
-                              </div>
-                              {checkInReview.capacityWarning ? (
-                                <p className="check-in-capacity-warning">{checkInReview.capacityWarning}</p>
-                              ) : null}
-                              <div className="check-in-confirmation-actions">
-                                <button className="button button-secondary" type="button" onClick={() => setCheckInReview(null)}>Cancel</button>
-                                <button className="button button-primary" type="button" onClick={confirmCheckIn}>Confirm check-in</button>
-                              </div>
-                            </div>
-                          ) : null}
 
                           {isExpanded ? (
                             <div className="registration-group" id={registrationPanelId}>
@@ -1036,6 +1046,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   )
   const [isCreatingEvent, setIsCreatingEvent] = useState(false)
   const [activeEventDraft, setActiveEventDraft] = useState<EventDraft | null>(null)
+  const [activeCheckInReview, setActiveCheckInReview] = useState<AttendeeCheckInReview | null>(null)
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null)
   const [organisationQuery, setOrganisationQuery] = useState('')
   const [organisationFilter, setOrganisationFilter] = useState<OrganisationFilter>('All organisations')
@@ -1112,6 +1123,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
       setSurface(route.surface)
       setOperationsOrganisationId(route.organisationId)
       setOperationsEventId(route.eventId)
+      setActiveCheckInReview(null)
       if (route.surface !== 'events' || route.organisationId || route.eventId) {
         activeEventDraftRef.current = null
         setActiveEventDraft(null)
@@ -1143,6 +1155,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setSurface('directory')
     setOperationsOrganisationId(null)
     setOperationsEventId(null)
+    setActiveCheckInReview(null)
     activeEventDraftRef.current = null
     setActiveEventDraft(null)
     setIsCreatingEvent(false)
@@ -1156,6 +1169,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setSurface('events')
     setOperationsOrganisationId(null)
     setOperationsEventId(null)
+    setActiveCheckInReview(null)
     requestAnimationFrame(scrollToTop)
   }
 
@@ -1164,6 +1178,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setSurface('events')
     setOperationsOrganisationId(organisationId)
     setOperationsEventId(eventId)
+    setActiveCheckInReview(null)
     activeEventDraftRef.current = null
     setActiveEventDraft(null)
     setIsCreatingEvent(false)
@@ -1175,6 +1190,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setSurface('directory')
     setOperationsOrganisationId(null)
     setOperationsEventId(null)
+    setActiveCheckInReview(null)
     activeEventDraftRef.current = null
     setActiveEventDraft(null)
     setIsCreatingEvent(false)
@@ -1219,6 +1235,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setSurface('directory')
     setOperationsOrganisationId(null)
     setOperationsEventId(null)
+    setActiveCheckInReview(null)
     pushAppPath('/')
     setSelectedOrganisationId(null)
     setOrganisationQuery('')
@@ -1328,68 +1345,165 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           },
         }, demoOrganisations.map((organisation) => organisation.id))
       : isEventControlRoom && operationsEventId
-        ? createEventReadTools(operationsEventId, {
-            getEventSnapshot: (eventId) => {
-              const active = readActiveSnapshot(eventId)
+        ? [
+            ...createEventReadTools(operationsEventId, {
+              getEventSnapshot: (eventId) => {
+                const active = readActiveSnapshot(eventId)
+                if (!active.ok) return active.result
+                const snapshot = active.snapshot
+                const organisation = organisationsById.get(snapshot.event.organisationId)
+                return webMcpResult(`${snapshot.event.name} snapshot read.`, {
+                  ok: true,
+                  event: {
+                    eventId: snapshot.event.id,
+                    organisationId: snapshot.event.organisationId,
+                    organisationName: organisation?.name ?? '',
+                    organisationLocation: organisation?.location ?? '',
+                    name: snapshot.event.name,
+                    startsAt: snapshot.event.startsAt,
+                    venue: snapshot.event.venue,
+                  },
+                  snapshotAt: snapshot.lastUpdatedAt,
+                  revision: snapshot.revision,
+                  totals: {
+                    registered: snapshot.registrationCount,
+                    checkedIn: snapshot.checkedInCount,
+                    notArrived: snapshot.notArrivedCount,
+                    capacity: snapshot.capacity,
+                    capacityRemaining: snapshot.capacityRemaining,
+                    overCapacityBy: snapshot.overCapacityBy,
+                  },
+                  capacityStatus: snapshot.capacityStatus,
+                  accountability: snapshot.activeAccountability
+                    ? { status: 'active', ...snapshot.activeAccountability }
+                    : {
+                        status: 'not-active',
+                        total: 0,
+                        accountedFor: 0,
+                        unconfirmed: 0,
+                        exemptNotPresent: 0,
+                      },
+                })
+              },
+              findAttendee: (eventId, query) => {
+                const active = readActiveSnapshot(eventId)
+                if (!active.ok) return active.result
+                const result = service.searchAttendees(query)
+                if (!result.ok) return webMcpError(result.error.code, result.error.message)
+                return webMcpResult(`Found ${result.data.length} attendee matches.`, {
+                  ok: true,
+                  eventId,
+                  query: query.trim(),
+                  matches: result.data,
+                })
+              },
+              getAttendanceAnomalies: (eventId) => {
+                const active = readActiveSnapshot(eventId)
+                if (!active.ok) return active.result
+                const anomalies = active.snapshot.anomalies.map(toWebMcpAnomaly)
+                return webMcpResult(`Found ${anomalies.length} attendance anomalies.`, {
+                  ok: true,
+                  eventId,
+                  anomalies,
+                })
+              },
+            }),
+            createAttendeeCheckInTool(operationsEventId, async (input) => {
+              const active = readActiveSnapshot(input.eventId)
               if (!active.ok) return active.result
-              const snapshot = active.snapshot
-              const organisation = organisationsById.get(snapshot.event.organisationId)
-              return webMcpResult(`${snapshot.event.name} snapshot read.`, {
-                ok: true,
-                event: {
-                  eventId: snapshot.event.id,
-                  organisationId: snapshot.event.organisationId,
-                  organisationName: organisation?.name ?? '',
-                  organisationLocation: organisation?.location ?? '',
-                  name: snapshot.event.name,
-                  startsAt: snapshot.event.startsAt,
-                  venue: snapshot.event.venue,
-                },
-                snapshotAt: snapshot.lastUpdatedAt,
-                revision: snapshot.revision,
-                totals: {
-                  registered: snapshot.registrationCount,
-                  checkedIn: snapshot.checkedInCount,
-                  notArrived: snapshot.notArrivedCount,
-                  capacity: snapshot.capacity,
-                  capacityRemaining: snapshot.capacityRemaining,
-                  overCapacityBy: snapshot.overCapacityBy,
-                },
-                capacityStatus: snapshot.capacityStatus,
-                accountability: snapshot.activeAccountability
-                  ? { status: 'active', ...snapshot.activeAccountability }
-                  : {
-                      status: 'not-active',
-                      total: 0,
-                      accountedFor: 0,
-                      unconfirmed: 0,
-                      exemptNotPresent: 0,
-                    },
+              if (!input.attendeeId) {
+                return webMcpError(
+                  'attendee_id_required',
+                  'Use the stable attendee identifier returned by find_attendee; a name or search query is not sufficient.',
+                )
+              }
+
+              const attendees = service.listAttendees()
+              if (!attendees.ok) return webMcpError(attendees.error.code, attendees.error.message)
+              const attendee = attendees.data.find((item) => item.attendeeId === input.attendeeId)
+              if (!attendee) {
+                return webMcpError(
+                  'attendee_not_found',
+                  'Use a stable attendee identifier returned by find_attendee for the active event.',
+                )
+              }
+
+              if (attendee.checkIn.status === 'checked-in') {
+                const activity = active.snapshot.activityTimeline.find((entry) => (
+                  entry.action === 'attendee-checked-in' && entry.targetId === attendee.attendeeId
+                ))
+                return webMcpResult(`${attendee.name} is already checked in.`, {
+                  ok: true,
+                  idempotent: true,
+                  eventId: input.eventId,
+                  attendee: {
+                    attendeeId: attendee.attendeeId,
+                    name: attendee.name,
+                    registrationReference: attendee.registrationGroup.reference,
+                  },
+                  previousState: { status: 'checked-in', checkedInAt: attendee.checkIn.checkedInAt },
+                  newState: { status: 'checked-in', checkedInAt: attendee.checkIn.checkedInAt },
+                  occupancy: {
+                    previous: active.snapshot.checkedInCount,
+                    current: active.snapshot.checkedInCount,
+                    capacity: active.snapshot.capacity,
+                  },
+                  activityId: activity?.id ?? null,
+                  revision: active.snapshot.revision,
+                })
+              }
+
+              const reason = input.reason.trim()
+              if (!reason) return webMcpError('reason_required', 'Provide a reason for the manual check-in.')
+              const review = service.prepareAttendeeCheckIn({
+                query: '',
+                attendeeId: attendee.attendeeId,
+                reason,
               })
-            },
-            findAttendee: (eventId, query) => {
-              const active = readActiveSnapshot(eventId)
-              if (!active.ok) return active.result
-              const result = service.searchAttendees(query)
+              if (!review.ok) return webMcpError(review.error.code, review.error.message)
+
+              flushSync(() => setActiveCheckInReview(review.data))
+              setOperationsAnnouncement(`${attendee.name} check-in ready for review.`)
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+              const reviewElement = document.getElementById('attendee-check-in-review')
+              if (reviewElement && typeof reviewElement.scrollIntoView === 'function') {
+                reviewElement.scrollIntoView({ block: 'nearest' })
+              }
+              if (!window.confirm(`Check in ${attendee.name}? Occupancy will change from ${review.data.currentOccupancy} to ${review.data.projectedOccupancy} of ${review.data.capacity}.`)) {
+                setActiveCheckInReview(null)
+                return webMcpError('confirmation_declined', 'Attendee check-in was not confirmed.')
+              }
+
+              const result = service.checkInAttendee({
+                attendeeId: attendee.attendeeId,
+                actor: demoToolActor,
+                reason,
+              })
+              setActiveCheckInReview(null)
               if (!result.ok) return webMcpError(result.error.code, result.error.message)
-              return webMcpResult(`Found ${result.data.length} attendee matches.`, {
+
+              setOperationsAnnouncement(`${attendee.name} checked in.`)
+              return webMcpResult(`${attendee.name} was checked in.`, {
                 ok: true,
-                eventId,
-                query: query.trim(),
-                matches: result.data,
+                idempotent: false,
+                eventId: input.eventId,
+                attendee: {
+                  attendeeId: attendee.attendeeId,
+                  name: attendee.name,
+                  registrationReference: attendee.registrationGroup.reference,
+                },
+                previousState: { status: 'not-arrived', checkedInAt: null },
+                newState: { status: 'checked-in', checkedInAt: result.data.activityEntry.occurredAt },
+                occupancy: {
+                  previous: review.data.currentOccupancy,
+                  current: result.data.snapshot.checkedInCount,
+                  capacity: result.data.snapshot.capacity,
+                },
+                activityId: result.data.activityEntry.id,
+                revision: result.data.snapshot.revision,
               })
-            },
-            getAttendanceAnomalies: (eventId) => {
-              const active = readActiveSnapshot(eventId)
-              if (!active.ok) return active.result
-              const anomalies = active.snapshot.anomalies.map(toWebMcpAnomaly)
-              return webMcpResult(`Found ${anomalies.length} attendance anomalies.`, {
-                ok: true,
-                eventId,
-                anomalies,
-              })
-            },
-          })
+            }),
+          ]
         : createEventContextTools(() => {
           const snapshot = service.getSnapshot()
           if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
@@ -1490,6 +1604,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               onSearchAttendees={service.searchAttendees}
               onPrepareAttendeeCheckIn={service.prepareAttendeeCheckIn}
               onCheckInAttendee={service.checkInAttendee}
+              checkInReview={activeCheckInReview}
+              onCheckInReviewChange={setActiveCheckInReview}
             />
           ) : operationsOrganisation && createdEventContext ? (
             <EventOverviewWorkspace
