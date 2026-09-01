@@ -38,6 +38,7 @@ import {
 import { createEventContextTools } from './webmcp/eventContextTools'
 import { createEventReadTools } from './webmcp/eventReadTools'
 import { createAttendeeCheckInTool } from './webmcp/attendeeCheckInTool'
+import { createAccountabilityTools } from './webmcp/accountabilityTools'
 
 type IconName = 'arrow' | 'calendar' | 'check' | 'chevron' | 'clock' | 'close' | 'location' | 'note' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
@@ -1482,6 +1483,18 @@ function App({ operationsService }: { operationsService?: EventOperationsService
       }
       return { ok: true as const, snapshot: snapshot.data }
     }
+    const readActiveAccountability = (requestedEventId: string) => {
+      const active = readActiveSnapshot(requestedEventId)
+      if (!active.ok) return active
+      const session = active.snapshot.accountabilitySession
+      if (!session || session.status !== 'active') {
+        return {
+          ok: false as const,
+          result: webMcpError('accountability_not_active', 'No accountability session is active.'),
+        }
+      }
+      return { ok: true as const, snapshot: active.snapshot, session }
+    }
     const tools = isEventList
       ? createEventPreparationTools({
           listEvents: () => {
@@ -1695,6 +1708,180 @@ function App({ operationsService }: { operationsService?: EventOperationsService
                 activityId: result.data.activityEntry.id,
                 revision: result.data.snapshot.revision,
               })
+            }),
+            ...createAccountabilityTools(operationsEventId, {
+              startAccountability: (eventId) => {
+                const active = readActiveSnapshot(eventId)
+                if (!active.ok) return active.result
+                if (active.snapshot.accountabilitySession) {
+                  return webMcpError('accountability_already_exists', 'An accountability session already exists for this event.')
+                }
+
+                const expectedAttendees = active.snapshot.checkedInCount
+                if (!window.confirm(`Start roll call for ${expectedAttendees} checked-in attendees? Updates will be recorded in Activity.`)) {
+                  return webMcpError('confirmation_declined', 'Starting the roll call was not confirmed.')
+                }
+
+                const result = service.startAccountability({ actor: demoToolActor })
+                if (!result.ok) return webMcpError(result.error.code, result.error.message)
+                const session = result.data.snapshot.accountabilitySession
+                if (!session) return webMcpError('invalid_state', 'The accountability session could not be read after it started.')
+
+                setOperationsAnnouncement(`Roll call started for ${session.totals.total} attendees.`)
+                return webMcpResult(`Roll call ${session.sessionId} started.`, {
+                  ok: true,
+                  eventId,
+                  sessionId: session.sessionId,
+                  expectedAttendees: session.totals.total,
+                  startedAt: session.startedAt,
+                  actor: {
+                    id: result.data.activityEntry.actor.id,
+                    displayName: result.data.activityEntry.actor.displayName,
+                    channel: result.data.activityEntry.actor.channel,
+                  },
+                  activityId: result.data.activityEntry.id,
+                  revision: result.data.snapshot.revision,
+                })
+              },
+              getUnconfirmedAttendees: (eventId) => {
+                const active = readActiveAccountability(eventId)
+                if (!active.ok) return active.result
+                const unconfirmed = active.session.records.filter((record) => record.status === 'unconfirmed')
+                return webMcpResult(`${unconfirmed.length} attendees remain unconfirmed.`, {
+                  ok: true,
+                  eventId,
+                  sessionId: active.session.sessionId,
+                  snapshotAt: active.session.updatedAt,
+                  totals: active.session.totals,
+                  attendees: unconfirmed.map((record) => ({
+                    attendeeId: record.attendeeId,
+                    name: record.attendeeName,
+                    status: 'unconfirmed',
+                    note: record.note,
+                  })),
+                })
+              },
+              recordAccountabilityStatus: (input) => {
+                const active = readActiveAccountability(input.eventId)
+                if (!active.ok) return active.result
+                if (input.status !== 'accounted_for') {
+                  return webMcpError('invalid_status', 'This tool can only record accounted_for.')
+                }
+                const record = active.session.records.find((item) => item.attendeeId === input.attendeeId)
+                if (!record) {
+                  return webMcpError('attendee_not_in_accountability', 'Use an attendee identifier returned by get_unconfirmed_attendees.')
+                }
+                if (record.status !== 'unconfirmed') {
+                  return webMcpError('attendee_not_unconfirmed', `${record.attendeeName} is not currently unconfirmed.`)
+                }
+                if (!window.confirm(`Mark ${record.attendeeName} as accounted for?`)) {
+                  return webMcpError('confirmation_declined', 'The accountability update was not confirmed.')
+                }
+
+                const note = input.note.trim()
+                const result = service.recordAccountabilityStatus({
+                  attendeeId: record.attendeeId,
+                  status: 'accounted-for',
+                  actor: demoToolActor,
+                  ...(note ? { note } : {}),
+                })
+                if (!result.ok) return webMcpError(result.error.code, result.error.message)
+
+                setOperationsAnnouncement(`${record.attendeeName} accounted for.`)
+                return webMcpResult(`${record.attendeeName} was recorded as accounted for.`, {
+                  ok: true,
+                  eventId: input.eventId,
+                  sessionId: active.session.sessionId,
+                  attendee: {
+                    attendeeId: record.attendeeId,
+                    name: record.attendeeName,
+                  },
+                  previousState: { status: 'unconfirmed' },
+                  newState: { status: 'accounted_for', note: note || null },
+                  actor: {
+                    id: result.data.activityEntry.actor.id,
+                    displayName: result.data.activityEntry.actor.displayName,
+                    channel: result.data.activityEntry.actor.channel,
+                  },
+                  recordedAt: result.data.activityEntry.occurredAt,
+                  activityId: result.data.activityEntry.id,
+                  totals: result.data.snapshot.accountabilitySession?.totals ?? null,
+                  revision: result.data.snapshot.revision,
+                })
+              },
+              generateIncidentSummary: (eventId) => {
+                const active = readActiveSnapshot(eventId)
+                if (!active.ok) return active.result
+                const session = active.snapshot.accountabilitySession
+                if (!session) return webMcpError('accountability_not_started', 'No accountability session exists for this event.')
+                const unresolvedAttendees = session.records.filter((record) => record.status === 'unconfirmed')
+                const recordedAttendees = session.records.filter((record) => record.hasRecordedStatus)
+                const missingStatuses = unresolvedAttendees.filter((record) => !record.hasRecordedStatus)
+
+                return webMcpResult(`Incident summary generated for roll call ${session.sessionId}.`, {
+                  ok: true,
+                  eventId,
+                  sessionId: session.sessionId,
+                  snapshotAt: session.updatedAt,
+                  recordedFacts: {
+                    session: {
+                      status: session.status,
+                      startedAt: session.startedAt,
+                      closedAt: session.closedAt,
+                    },
+                    totals: session.totals,
+                    attendeeStatuses: recordedAttendees.map((record) => ({
+                      attendeeId: record.attendeeId,
+                      name: record.attendeeName,
+                      status: record.status === 'accounted-for' ? 'accounted_for' : record.status,
+                      recordedAt: record.updatedAt,
+                      note: record.note,
+                    })),
+                    unresolvedAttendees: unresolvedAttendees.map((record) => ({
+                      attendeeId: record.attendeeId,
+                      name: record.attendeeName,
+                    })),
+                  },
+                  missingInformation: {
+                    attendeeStatuses: missingStatuses.map((record) => ({
+                      attendeeId: record.attendeeId,
+                      name: record.attendeeName,
+                    })),
+                  },
+                  limitations: {
+                    physicalSafetyInferred: false,
+                  },
+                })
+              },
+              closeAccountability: (eventId) => {
+                const active = readActiveAccountability(eventId)
+                if (!active.ok) return active.result
+                const unresolved = active.session.totals.unconfirmed
+                if (!window.confirm(`Close roll call with ${unresolved} unconfirmed?`)) {
+                  return webMcpError('confirmation_declined', 'Closing the roll call was not confirmed.')
+                }
+
+                const result = service.closeAccountability({ actor: demoToolActor })
+                if (!result.ok) return webMcpError(result.error.code, result.error.message)
+                const session = result.data.snapshot.accountabilitySession
+                if (!session) return webMcpError('invalid_state', 'The closed accountability session could not be read.')
+
+                setOperationsAnnouncement(`Roll call closed with ${session.totals.unconfirmed} unconfirmed.`)
+                return webMcpResult(`Roll call ${session.sessionId} closed.`, {
+                  ok: true,
+                  eventId,
+                  sessionId: session.sessionId,
+                  unresolvedAttendees: session.totals.unconfirmed,
+                  closedAt: session.closedAt,
+                  actor: session.closedBy ? {
+                    id: session.closedBy.id,
+                    displayName: session.closedBy.displayName,
+                    channel: session.closedBy.channel,
+                  } : null,
+                  activityId: result.data.activityEntry.id,
+                  revision: result.data.snapshot.revision,
+                })
+              },
             }),
           ]
         : createEventContextTools(() => {

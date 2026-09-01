@@ -663,6 +663,9 @@ export function createEventOperationsService(
             activityId,
             closedAt: occurredAt,
             actor: request.actor,
+            ...(toolName(request.actor, 'close_evacuation_accountability')
+              ? { toolName: 'close_evacuation_accountability' }
+              : {}),
           })
           return { state: transition.state, value: transition.activityEntry }
         })
@@ -678,6 +681,9 @@ export function createEventOperationsService(
           actor: request.actor,
           occurredAt,
           resultSummary: 'Accountability closure was not saved.',
+          ...(toolName(request.actor, 'close_evacuation_accountability')
+            ? { toolName: 'close_evacuation_accountability' }
+            : {}),
         })
         return failure(error)
       }

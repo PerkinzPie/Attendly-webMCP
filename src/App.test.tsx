@@ -7,6 +7,18 @@ import { createDemoEventOperationsState, demoOrganisations } from './demo/seed'
 import type { OperationsActor } from './domain/eventOperations'
 import type { WebMcpTool } from './webmcp/browserAdapter'
 
+const activeEventToolNames = [
+  'get_event_snapshot',
+  'find_attendee',
+  'get_attendance_anomalies',
+  'check_in_attendee',
+  'start_evacuation_accountability',
+  'get_unconfirmed_attendees',
+  'record_accountability_status',
+  'generate_incident_summary',
+  'close_evacuation_accountability',
+]
+
 const organiser: OperationsActor = {
   id: 'actor_shell_test',
   displayName: 'Synthetic shell tester',
@@ -262,12 +274,7 @@ describe('Attendly organisation directory', () => {
     expect(eventRow).not.toBeNull()
     fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
 
-    await waitFor(() => expect([...tools.keys()]).toEqual([
-      'get_event_snapshot',
-      'find_attendee',
-      'get_attendance_anomalies',
-      'check_in_attendee',
-    ]))
+    await waitFor(() => expect([...tools.keys()]).toEqual(activeEventToolNames))
     await expect(staleListTool?.execute({})).rejects.toMatchObject({ name: 'AbortError' })
     const result = await tools.get('get_event_snapshot')?.execute({ eventId: 'evt_riverside_community_workshop' }) as {
       structuredContent: { event: { eventId: string, organisationId: string, organisationName: string, organisationLocation: string, venue: string } }
@@ -315,12 +322,7 @@ describe('Attendly organisation directory', () => {
     render(<App operationsService={service} />)
     openManagedEvent()
 
-    await waitFor(() => expect([...tools.keys()]).toEqual([
-      'get_event_snapshot',
-      'find_attendee',
-      'get_attendance_anomalies',
-      'check_in_attendee',
-    ]))
+    await waitFor(() => expect([...tools.keys()]).toEqual(activeEventToolNames))
     expect(['get_event_snapshot', 'find_attendee', 'get_attendance_anomalies']
       .every((name) => tools.get(name)?.annotations?.readOnlyHint)).toBe(true)
     expect(tools.get('check_in_attendee')?.annotations?.readOnlyHint).toBe(false)
@@ -508,6 +510,197 @@ describe('Attendly organisation directory', () => {
     expect(snapshot.ok && snapshot.data.activityTimeline.filter((entry) => (
       entry.action === 'attendee-checked-in' && entry.targetId === 'att_sarah_jenkins'
     ))).toHaveLength(1)
+  })
+
+  it('exposes confirmed, audited evacuation accountability tools', async () => {
+    const service = createTestOperationsService()
+    const tools = installModelContext()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App operationsService={service} />)
+    openManagedEvent()
+
+    await waitFor(() => expect([...tools.keys()]).toEqual(activeEventToolNames))
+    const startTool = tools.get('start_evacuation_accountability')
+    const unconfirmedTool = tools.get('get_unconfirmed_attendees')
+    const recordTool = tools.get('record_accountability_status')
+    const summaryTool = tools.get('generate_incident_summary')
+    const closeTool = tools.get('close_evacuation_accountability')
+    expect(unconfirmedTool?.annotations?.readOnlyHint).toBe(true)
+    expect(summaryTool?.annotations?.readOnlyHint).toBe(true)
+    const before = service.getSnapshot()
+
+    const declinedStart = await startTool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+    }) as { structuredContent: { error: { code: string } } }
+    expect(confirm).toHaveBeenLastCalledWith(
+      'Start roll call for 13 checked-in attendees? Updates will be recorded in Activity.',
+    )
+    expect(declinedStart.structuredContent.error.code).toBe('confirmation_declined')
+    expect(service.getSnapshot()).toEqual(before)
+
+    confirm.mockReturnValue(true)
+    let started: {
+      structuredContent: {
+        sessionId: string
+        expectedAttendees: number
+        actor: { channel: string }
+        activityId: string
+        revision: number
+      }
+    } | undefined
+    await act(async () => {
+      started = await startTool?.execute({
+        eventId: 'evt_riverside_community_workshop',
+      }) as typeof started
+    })
+    expect(started?.structuredContent).toMatchObject({
+      sessionId: expect.any(String),
+      expectedAttendees: 13,
+      actor: { channel: 'webmcp' },
+      activityId: expect.any(String),
+      revision: 1,
+    })
+
+    const afterStart = service.getSnapshot()
+    const unconfirmed = await unconfirmedTool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+    }) as {
+      structuredContent: {
+        sessionId: string
+        snapshotAt: string
+        totals: { total: number, accountedFor: number, unconfirmed: number }
+        attendees: Array<{ attendeeId: string, name: string, status: string }>
+      }
+    }
+    expect(unconfirmed.structuredContent).toMatchObject({
+      sessionId: started?.structuredContent.sessionId,
+      snapshotAt: '2026-09-05T18:30:00+01:00',
+      totals: { total: 13, accountedFor: 0, unconfirmed: 13 },
+    })
+    expect(unconfirmed.structuredContent.attendees).toHaveLength(13)
+    expect(unconfirmed.structuredContent.attendees).toContainEqual({
+      attendeeId: 'att_amina_patel',
+      name: 'Amina Patel',
+      status: 'unconfirmed',
+      note: null,
+    })
+    expect(service.getSnapshot()).toEqual(afterStart)
+
+    const invalidStatus = await recordTool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+      attendeeId: 'att_amina_patel',
+      status: 'safe',
+    }) as { structuredContent: { error: { code: string } } }
+    expect(invalidStatus.structuredContent.error.code).toBe('invalid_status')
+
+    confirm.mockReturnValue(false)
+    const declinedRecord = await recordTool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+      attendeeId: 'att_amina_patel',
+      status: 'accounted_for',
+      note: 'At the east assembly point.',
+    }) as { structuredContent: { error: { code: string } } }
+    expect(confirm).toHaveBeenLastCalledWith('Mark Amina Patel as accounted for?')
+    expect(declinedRecord.structuredContent.error.code).toBe('confirmation_declined')
+    expect(service.getSnapshot()).toEqual(afterStart)
+
+    confirm.mockReturnValue(true)
+    let recorded: {
+      structuredContent: {
+        previousState: { status: string }
+        newState: { status: string, note: string | null }
+        actor: { channel: string }
+        recordedAt: string
+        activityId: string
+        totals: { accountedFor: number, unconfirmed: number }
+      }
+    } | undefined
+    await act(async () => {
+      recorded = await recordTool?.execute({
+        eventId: 'evt_riverside_community_workshop',
+        attendeeId: 'att_amina_patel',
+        status: 'accounted_for',
+        note: 'At the east assembly point.',
+      }) as typeof recorded
+    })
+    expect(recorded?.structuredContent).toMatchObject({
+      previousState: { status: 'unconfirmed' },
+      newState: { status: 'accounted_for', note: 'At the east assembly point.' },
+      actor: { channel: 'webmcp' },
+      recordedAt: '2026-09-05T18:30:00+01:00',
+      activityId: expect.any(String),
+      totals: { accountedFor: 1, unconfirmed: 12 },
+    })
+
+    const summary = await summaryTool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+    }) as {
+      structuredContent: {
+        recordedFacts: {
+          session: { status: string, startedAt: string, closedAt: string | null }
+          totals: { accountedFor: number, unconfirmed: number }
+          attendeeStatuses: Array<{ attendeeId: string, status: string }>
+          unresolvedAttendees: Array<{ attendeeId: string }>
+        }
+        missingInformation: { attendeeStatuses: Array<{ attendeeId: string }> }
+        limitations: { physicalSafetyInferred: boolean }
+      }
+    }
+    expect(summary.structuredContent).toMatchObject({
+      recordedFacts: {
+        session: {
+          status: 'active',
+          startedAt: '2026-09-05T18:30:00+01:00',
+          closedAt: null,
+        },
+        totals: { accountedFor: 1, unconfirmed: 12 },
+        attendeeStatuses: [{ attendeeId: 'att_amina_patel', status: 'accounted_for' }],
+      },
+      limitations: { physicalSafetyInferred: false },
+    })
+    expect(summary.structuredContent.recordedFacts.unresolvedAttendees).toHaveLength(12)
+    expect(summary.structuredContent.missingInformation.attendeeStatuses).toHaveLength(12)
+
+    confirm.mockReturnValue(false)
+    const declinedClose = await closeTool?.execute({
+      eventId: 'evt_riverside_community_workshop',
+    }) as { structuredContent: { error: { code: string } } }
+    expect(confirm).toHaveBeenLastCalledWith('Close roll call with 12 unconfirmed?')
+    expect(declinedClose.structuredContent.error.code).toBe('confirmation_declined')
+
+    confirm.mockReturnValue(true)
+    let closed: {
+      structuredContent: {
+        sessionId: string
+        unresolvedAttendees: number
+        closedAt: string
+        actor: { channel: string }
+        activityId: string
+      }
+    } | undefined
+    await act(async () => {
+      closed = await closeTool?.execute({
+        eventId: 'evt_riverside_community_workshop',
+      }) as typeof closed
+    })
+    expect(closed?.structuredContent).toMatchObject({
+      sessionId: started?.structuredContent.sessionId,
+      unresolvedAttendees: 12,
+      closedAt: '2026-09-05T18:30:00+01:00',
+      actor: { channel: 'webmcp' },
+      activityId: expect.any(String),
+    })
+    expect(service.getSnapshot()).toMatchObject({
+      ok: true,
+      data: {
+        accountabilitySession: { status: 'closed' },
+        activityTimeline: expect.arrayContaining([
+          expect.objectContaining({ action: 'accountability-started', toolName: 'start_evacuation_accountability' }),
+          expect.objectContaining({ action: 'accountability-status-recorded', toolName: 'record_accountability_status' }),
+          expect.objectContaining({ action: 'accountability-closed', toolName: 'close_evacuation_accountability' }),
+        ]),
+      },
+    })
   })
 
   it('provides a one-click roll check with optional notes and auditable corrections', () => {
