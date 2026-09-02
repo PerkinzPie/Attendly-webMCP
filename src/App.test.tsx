@@ -114,6 +114,85 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('Site tools require a WebMCP-enabled browser.')).toBeInTheDocument()
   })
 
+  it('exposes scoped public event search and detail tools', async () => {
+    const tools = installModelContext()
+    render(<App operationsService={createTestOperationsService()} />)
+
+    await waitFor(() => expect([...tools.keys()]).toEqual([
+      'search_public_events',
+      'get_public_event_details',
+    ]))
+    expect(tools.get('search_public_events')?.annotations?.readOnlyHint).toBe(true)
+    expect(tools.get('get_public_event_details')?.annotations?.readOnlyHint).toBe(true)
+
+    const search = await tools.get('search_public_events')?.execute({
+      fromDate: '2026-09-02',
+      toDate: '2027-03-02',
+      audience: 'children',
+      age: 4,
+    }) as {
+      structuredContent: {
+        ok: boolean
+        scope: { organisationId: string | null }
+        events: Array<{
+          eventId: string
+          suitability: { evidence: string }
+          availability: { remaining: number }
+        }>
+      }
+    }
+    expect(search.structuredContent.scope).toEqual({ organisationId: null })
+    expect(search.structuredContent.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventId: 'evt_autumn_fair',
+        suitability: expect.objectContaining({ evidence: 'organiser-authored event metadata' }),
+        availability: expect.objectContaining({ remaining: 44 }),
+      }),
+    ]))
+
+    const excessiveRange = await tools.get('search_public_events')?.execute({
+      fromDate: '2026-09-02',
+      toDate: '2027-03-03',
+    }) as { structuredContent: { error: { code: string } } }
+    expect(excessiveRange.structuredContent.error.code).toBe('date_range_too_large')
+
+    const details = await tools.get('get_public_event_details')?.execute({
+      eventId: 'evt_autumn_fair',
+    }) as {
+      structuredContent: {
+        event: {
+          eventId: string
+          publicationStatus: string
+          bookingRules: { maximumTicketsPerBooking: number }
+        }
+      }
+    }
+    expect(details.structuredContent.event).toMatchObject({
+      eventId: 'evt_autumn_fair',
+      publicationStatus: 'published',
+      bookingRules: { maximumTicketsPerBooking: 6 },
+    })
+    expect(JSON.stringify(details.structuredContent)).not.toMatch(/attendee|email|check-in/i)
+
+    openOrganisation('Willowbrook Primary School')
+    await waitFor(() => {
+      const eventSchema = tools.get('get_public_event_details')?.inputSchema.properties as Record<string, { enum: string[] }>
+      expect(eventSchema.eventId.enum).toEqual([
+        'evt_autumn_fair',
+        'evt_online_safety',
+        'evt_reception_welcome',
+      ])
+    })
+    const scopedSearch = await tools.get('search_public_events')?.execute({
+      fromDate: '2026-09-02',
+      toDate: '2027-03-02',
+    }) as { structuredContent: { scope: { organisationId: string }, events: Array<{ organisation: { id: string } }> } }
+    expect(scopedSearch.structuredContent.scope).toEqual({ organisationId: 'org_westbrook_school' })
+    expect(scopedSearch.structuredContent.events.every((event) => (
+      event.organisation.id === 'org_westbrook_school'
+    ))).toBe(true)
+  })
+
   it('lists events and opens a stable event management context', () => {
     render(<App />)
 

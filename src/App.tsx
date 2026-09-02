@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, use
 import { flushSync } from 'react-dom'
 import './App.css'
 import { getDemoEventOperationsService } from './application/demoEventOperations'
+import { createPublicEventCatalogue } from './application/publicEventCatalogue'
 import type {
   EventOperationsService,
   EventOperationsServiceSnapshot,
@@ -39,6 +40,7 @@ import { createEventContextTools } from './webmcp/eventContextTools'
 import { createEventReadTools } from './webmcp/eventReadTools'
 import { createAttendeeCheckInTool } from './webmcp/attendeeCheckInTool'
 import { createAccountabilityTools } from './webmcp/accountabilityTools'
+import { createPublicEventTools } from './webmcp/publicEventTools'
 
 type IconName = 'arrow' | 'calendar' | 'check' | 'chevron' | 'clock' | 'close' | 'location' | 'note' | 'refresh' | 'search' | 'ticket'
 type BookingStage = 'event' | 'details' | 'review' | 'confirmed'
@@ -1222,6 +1224,7 @@ function OperationsWorkspace({
 
 function App({ operationsService }: { operationsService?: EventOperationsService }) {
   const [service] = useState(() => operationsService ?? getDemoEventOperationsService())
+  const [publicEventCatalogue] = useState(() => createPublicEventCatalogue(demoEvents, demoOrganisations))
   const [initialOperationsResult] = useState(() => service.getSnapshot())
   const [initialRoute] = useState(readAppRoute)
   const [webMcpSupported] = useState(hasWebMcpSupport)
@@ -1452,7 +1455,39 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   }
 
   useEffect(() => {
-    if (surface !== 'events') return
+    if (surface === 'directory') {
+      const scopedEvents = selectedOrganisationId
+        ? getOrganisationEvents(selectedOrganisationId)
+        : demoEvents
+      const tools = createPublicEventTools(scopedEvents.map((event) => event.id), {
+        searchPublicEvents: (input) => {
+          const result = publicEventCatalogue.search({
+            ...input,
+            ...(selectedOrganisationId ? { organisationId: selectedOrganisationId } : {}),
+          })
+          if (!result.ok) return webMcpError(result.error.code, result.error.message)
+          return webMcpResult(`Found ${result.data.length} published events.`, {
+            ok: true,
+            scope: selectedOrganisationId
+              ? { organisationId: selectedOrganisationId }
+              : { organisationId: null },
+            query: input,
+            events: result.data,
+          })
+        },
+        getPublicEventDetails: (eventId) => {
+          const result = publicEventCatalogue.getDetails(eventId, selectedOrganisationId ?? undefined)
+          if (!result.ok) return webMcpError(result.error.code, result.error.message)
+          return webMcpResult(`${result.data.name} details read.`, {
+            ok: true,
+            event: result.data,
+          })
+        },
+      })
+      const registration = registerWebMcpTools(tools)
+      void registration.ready.catch(() => undefined)
+      return registration.unregister
+    }
 
     const isEventList = operationsOrganisationId === null && operationsEventId === null
     const isEventControlRoom = snapshotEventId === operationsEventId
@@ -1907,7 +1942,16 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     const registration = registerWebMcpTools(tools)
     void registration.ready.catch(() => undefined)
     return registration.unregister
-  }, [operationsEventId, operationsOrganisationId, service, snapshotEventId, snapshotOrganisationId, surface])
+  }, [
+    operationsEventId,
+    operationsOrganisationId,
+    publicEventCatalogue,
+    selectedOrganisationId,
+    service,
+    snapshotEventId,
+    snapshotOrganisationId,
+    surface,
+  ])
 
   const openEvent = (item: DemoEvent) => {
     setSelectedEvent(item)

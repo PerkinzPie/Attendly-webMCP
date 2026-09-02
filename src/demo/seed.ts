@@ -16,6 +16,18 @@ export type EventCategory =
   | 'Performance'
   | 'Workshop'
 
+export type PublicEventAudience =
+  | 'adults'
+  | 'all-ages'
+  | 'children'
+  | 'families'
+
+export type PublicEventAgeGuidance = {
+  label: string
+  minAge?: number
+  maxAge?: number
+}
+
 export type DemoOrganisation = {
   id: string
   name: string
@@ -38,6 +50,10 @@ export type DemoEvent = {
   timeLabel: string
   venue: string
   category: EventCategory
+  publicationStatus: 'published'
+  pricePence: 0
+  audiences: readonly PublicEventAudience[]
+  ageGuidance: PublicEventAgeGuidance
   capacity: number
   reservedTickets: number
   availabilityLabel: string
@@ -188,6 +204,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Join families, staff and friends for children’s games, local food stalls, live music and a quiet activity room. Entry is free, but please book so the school can plan safely for numbers.',
     startsAt: '2026-09-19T12:00:00+01:00', dateLabel: 'Saturday 19 September 2026',
     dateShort: { day: '19', month: 'SEP' }, timeLabel: '12:00–16:00', venue: 'School Hall & Playground',
+    publicationStatus: 'published', pricePence: 0, audiences: ['all-ages', 'families', 'children'], ageGuidance: { label: 'All ages welcome', minAge: 0, maxAge: 17 },
     category: 'Family', capacity: 180, reservedTickets: 136, bookingClosesLabel: 'Bookings close 18 September at 18:00', featured: true,
   }),
   event({
@@ -196,6 +213,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'The safeguarding lead will share practical guidance on devices, games and social media, with time for anonymous questions.',
     startsAt: '2026-10-21T18:00:00+01:00', dateLabel: 'Wednesday 21 October 2026',
     dateShort: { day: '21', month: 'OCT' }, timeLabel: '18:00–19:15', venue: 'School Library',
+    publicationStatus: 'published', pricePence: 0, audiences: ['adults'], ageGuidance: { label: 'For parents and carers' },
     category: 'Parents & carers', capacity: 48, reservedTickets: 20, bookingClosesLabel: 'Bookings close 20 October at 18:00',
   }),
   event({
@@ -204,6 +222,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'A relaxed welcome for families joining Reception in September 2027, with time to explore the learning spaces.',
     startsAt: '2027-01-23T10:00:00Z', dateLabel: 'Saturday 23 January 2027',
     dateShort: { day: '23', month: 'JAN' }, timeLabel: '10:00–11:30', venue: 'Reception Classrooms',
+    publicationStatus: 'published', pricePence: 0, audiences: ['families', 'children'], ageGuidance: { label: 'Families joining Reception in September 2027', minAge: 3, maxAge: 5 },
     category: 'Parents & carers', capacity: 64, reservedTickets: 18, bookingClosesLabel: 'Bookings close 22 January at 18:00',
   }),
   event({
@@ -212,6 +231,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Bring a team of up to six or join one on the night. Children are welcome when accompanied by an adult.',
     startsAt: '2026-10-09T18:30:00+01:00', dateLabel: 'Friday 9 October 2026',
     dateShort: { day: '09', month: 'OCT' }, timeLabel: '18:30–20:30', venue: 'Willowbrook Main Hall',
+    publicationStatus: 'published', pricePence: 0, audiences: ['families', 'children'], ageGuidance: { label: 'Children welcome with an accompanying adult', minAge: 4, maxAge: 11 },
     category: 'Fundraising', capacity: 96, reservedTickets: 78, bookingClosesLabel: 'Bookings close 8 October at 18:00', featured: true,
   }),
   event({
@@ -220,6 +240,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Browse local maker stalls, hear short pupil performances and warm up with seasonal food and drink.',
     startsAt: '2026-12-05T11:00:00Z', dateLabel: 'Saturday 5 December 2026',
     dateShort: { day: '05', month: 'DEC' }, timeLabel: '11:00–15:00', venue: 'Willowbrook Main Hall',
+    publicationStatus: 'published', pricePence: 0, audiences: ['all-ages', 'families', 'children'], ageGuidance: { label: 'All ages welcome', minAge: 0, maxAge: 17 },
     category: 'Fundraising', capacity: 220, reservedTickets: 154, bookingClosesLabel: 'Bookings close 4 December at 18:00',
   }),
   event({
@@ -228,6 +249,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Bring clean, labelled uniform to swap or collect what your family needs. No donation is required to attend.',
     startsAt: '2027-01-09T10:00:00Z', dateLabel: 'Saturday 9 January 2027',
     dateShort: { day: '09', month: 'JAN' }, timeLabel: '10:00–12:00', venue: 'Willowbrook Dining Hall',
+    publicationStatus: 'published', pricePence: 0, audiences: ['all-ages', 'families', 'children'], ageGuidance: { label: 'School families of all ages', minAge: 0, maxAge: 17 },
     category: 'Community', capacity: 90, reservedTickets: 34, bookingClosesLabel: 'Bookings close 8 January at 18:00',
   }),
   event({
@@ -236,6 +258,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Come alone or with family for a relaxed two-course lunch. Vegetarian and allergy-aware options are available.',
     startsAt: '2026-09-27T12:30:00+01:00', dateLabel: 'Sunday 27 September 2026',
     dateShort: { day: '27', month: 'SEP' }, timeLabel: '12:30–14:30', venue: 'St Cuthbert’s Church Hall',
+    publicationStatus: 'published', pricePence: 0, audiences: ['all-ages', 'families', 'children', 'adults'], ageGuidance: { label: 'Open to every age', minAge: 0, maxAge: 17 },
     category: 'Community', capacity: 84, reservedTickets: 61, bookingClosesLabel: 'Bookings close 25 September at 18:00', featured: true,
   }),
   event({
@@ -244,6 +267,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'A welcoming music session led by local volunteers. Instruments are provided and siblings are welcome.',
     startsAt: '2026-11-03T10:00:00Z', dateLabel: 'Tuesday 3 November 2026',
     dateShort: { day: '03', month: 'NOV' }, timeLabel: '10:00–11:15', venue: 'Garden Room',
+    publicationStatus: 'published', pricePence: 0, audiences: ['families', 'children'], ageGuidance: { label: 'Under-fives with their grown-ups', minAge: 0, maxAge: 4 },
     category: 'Family', capacity: 36, reservedTickets: 28, bookingClosesLabel: 'Bookings close 2 November at 18:00',
   }),
   event({
@@ -252,6 +276,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'An informal evening featuring local choirs and familiar carols. Step-free seating is available.',
     startsAt: '2026-12-18T18:30:00Z', dateLabel: 'Friday 18 December 2026',
     dateShort: { day: '18', month: 'DEC' }, timeLabel: '18:30–20:00', venue: 'Main Church',
+    publicationStatus: 'published', pricePence: 0, audiences: ['all-ages', 'families', 'children', 'adults'], ageGuidance: { label: 'All ages welcome', minAge: 0, maxAge: 17 },
     category: 'Performance', capacity: 160, reservedTickets: 121, bookingClosesLabel: 'Bookings close 17 December at 18:00',
   }),
   event({
@@ -260,6 +285,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'A local artist will guide families through safe block-printing techniques. All materials are supplied.',
     startsAt: '2026-09-26T10:30:00+01:00', dateLabel: 'Saturday 26 September 2026',
     dateShort: { day: '26', month: 'SEP' }, timeLabel: '10:30–12:30', venue: 'Studio One',
+    publicationStatus: 'published', pricePence: 0, audiences: ['families', 'children'], ageGuidance: { label: 'For families; no numeric age range specified' },
     category: 'Workshop', capacity: 30, reservedTickets: 24, bookingClosesLabel: 'Bookings close 25 September at 16:00', featured: true,
   }),
   event({
@@ -268,6 +294,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Doors open at 19:00 for an intimate seated performance with a short interval.',
     startsAt: '2026-11-20T19:30:00Z', dateLabel: 'Friday 20 November 2026',
     dateShort: { day: '20', month: 'NOV' }, timeLabel: '19:30–22:00', venue: 'The Old Market Rooms',
+    publicationStatus: 'published', pricePence: 0, audiences: ['adults'], ageGuidance: { label: 'Adult audience' },
     category: 'Performance', capacity: 72, reservedTickets: 63, bookingClosesLabel: 'Bookings close 20 November at 17:00',
   }),
   event({
@@ -276,6 +303,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Drop in for a guided look around the venue and practical advice from the events team.',
     startsAt: '2027-02-06T11:00:00Z', dateLabel: 'Saturday 6 February 2027',
     dateShort: { day: '06', month: 'FEB' }, timeLabel: '11:00–15:00', venue: 'The Old Market Rooms',
+    publicationStatus: 'published', pricePence: 0, audiences: ['adults'], ageGuidance: { label: 'For prospective venue customers' },
     category: 'Community', capacity: 100, reservedTickets: 39, bookingClosesLabel: 'Bookings close 5 February at 18:00',
   }),
   event({
@@ -284,6 +312,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Young people aged 11–15 can learn alongside volunteer mentors. Laptops and refreshments are provided.',
     startsAt: '2026-10-17T10:00:00+01:00', dateLabel: 'Saturday 17 October 2026',
     dateShort: { day: '17', month: 'OCT' }, timeLabel: '10:00–12:30', venue: 'Severnside Workshop',
+    publicationStatus: 'published', pricePence: 0, audiences: ['children'], ageGuidance: { label: 'Ages 11–15', minAge: 11, maxAge: 15 },
     category: 'Workshop', capacity: 28, reservedTickets: 22, bookingClosesLabel: 'Bookings close 16 October at 18:00', featured: true,
   }),
   event({
@@ -292,6 +321,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'A practical family session for ages eight and up. Ingredients, equipment and aprons are supplied.',
     startsAt: '2026-11-28T11:00:00Z', dateLabel: 'Saturday 28 November 2026',
     dateShort: { day: '28', month: 'NOV' }, timeLabel: '11:00–13:00', venue: 'Community Kitchen',
+    publicationStatus: 'published', pricePence: 0, audiences: ['families', 'children'], ageGuidance: { label: 'Ages eight and up with family', minAge: 8, maxAge: 17 },
     category: 'Family', capacity: 32, reservedTickets: 19, bookingClosesLabel: 'Bookings close 26 November at 18:00',
   }),
   event({
@@ -300,6 +330,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Meet the project team, understand the safeguarding process and hear from current volunteer mentors.',
     startsAt: '2027-01-14T18:00:00Z', dateLabel: 'Thursday 14 January 2027',
     dateShort: { day: '14', month: 'JAN' }, timeLabel: '18:00–19:30', venue: 'Severnside Meeting Room',
+    publicationStatus: 'published', pricePence: 0, audiences: ['adults'], ageGuidance: { label: 'For adult volunteer mentors' },
     category: 'Community', capacity: 40, reservedTickets: 14, bookingClosesLabel: 'Bookings close 13 January at 18:00',
   }),
   event({
@@ -308,6 +339,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Coaches will run rotating taster sessions for primary-aged children and their adults. Equipment is provided.',
     startsAt: '2026-09-12T10:00:00+01:00', dateLabel: 'Saturday 12 September 2026',
     dateShort: { day: '12', month: 'SEP' }, timeLabel: '10:00–13:00', venue: 'Kingsmead Sports Ground',
+    publicationStatus: 'published', pricePence: 0, audiences: ['families', 'children'], ageGuidance: { label: 'Primary-aged children with their adults', minAge: 4, maxAge: 11 },
     category: 'Family', capacity: 120, reservedTickets: 87, bookingClosesLabel: 'Bookings close 11 September at 18:00', featured: true,
   }),
   event({
@@ -316,6 +348,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'A facilitated workshop for volunteer coaches covering adaptation, communication and inclusive session planning.',
     startsAt: '2026-11-07T09:30:00Z', dateLabel: 'Saturday 7 November 2026',
     dateShort: { day: '07', month: 'NOV' }, timeLabel: '09:30–12:30', venue: 'Clubhouse',
+    publicationStatus: 'published', pricePence: 0, audiences: ['adults'], ageGuidance: { label: 'For adult volunteer coaches' },
     category: 'Workshop', capacity: 36, reservedTickets: 25, bookingClosesLabel: 'Bookings close 6 November at 18:00',
   }),
   event({
@@ -324,6 +357,7 @@ export const demoEvents: readonly DemoEvent[] = [
     description: 'Choose a two-kilometre or five-kilometre route led by club volunteers. Both routes finish at the clubhouse.',
     startsAt: '2027-01-02T10:30:00Z', dateLabel: 'Saturday 2 January 2027',
     dateShort: { day: '02', month: 'JAN' }, timeLabel: '10:30–12:30', venue: 'Kingsmead Sports Ground',
+    publicationStatus: 'published', pricePence: 0, audiences: ['all-ages', 'families', 'children', 'adults'], ageGuidance: { label: 'All ages welcome', minAge: 0, maxAge: 17 },
     category: 'Community', capacity: 100, reservedTickets: 46, bookingClosesLabel: 'Bookings close 1 January at 12:00',
   }),
 ] as const
@@ -343,6 +377,10 @@ const operationsEvent: DemoEvent = event({
   timeLabel: '18:30–20:30',
   venue: 'Riverside Community Hall',
   category: 'Workshop',
+  publicationStatus: 'published',
+  pricePence: 0,
+  audiences: ['adults'],
+  ageGuidance: { label: 'For registered workshop participants' },
   capacity: 20,
   reservedTickets: 16,
   bookingClosesLabel: 'Bookings closed 5 September at 17:30',
