@@ -39,7 +39,9 @@ import {
 import {
   hasWebMcpSupport,
   registerWebMcpTools,
+  watchWebMcpSupport,
   webMcpCompatibilityGuidance,
+  type WebMcpTool,
 } from './webmcp/browserAdapter'
 import { createEventContextTools } from './webmcp/eventContextTools'
 import { createEventReadTools } from './webmcp/eventReadTools'
@@ -1232,7 +1234,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   ))
   const [initialOperationsResult] = useState(() => service.getSnapshot())
   const [initialRoute] = useState(readAppRoute)
-  const [webMcpSupported] = useState(hasWebMcpSupport)
+  const [webMcpSupported, setWebMcpSupported] = useState(hasWebMcpSupport)
+  const [webMcpRegistrationError, setWebMcpRegistrationError] = useState<string | null>(null)
   const [surface, setSurface] = useState<AppSurface>(initialRoute.surface)
   const [operationsOrganisationId, setOperationsOrganisationId] = useState<string | null>(initialRoute.organisationId)
   const [operationsEventId, setOperationsEventId] = useState<string | null>(initialRoute.eventId)
@@ -1466,6 +1469,29 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     requestAnimationFrame(() => directoryHeadingRef.current?.focus())
   }
 
+  const activateWebMcpTools = (tools: readonly WebMcpTool[]) => {
+    const registration = registerWebMcpTools(tools)
+    if (!registration.supported) return () => undefined
+    setWebMcpRegistrationError(null)
+    registration.ready.then(
+      () => {
+        console.info(`WebMCP: registered ${tools.length} site tools for this page.`)
+      },
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`WebMCP: site tool registration failed. ${message}`)
+        setWebMcpRegistrationError(message)
+      },
+    )
+    return registration.unregister
+  }
+
+  useEffect(() => {
+    if (webMcpSupported) return
+    const watch = watchWebMcpSupport(() => setWebMcpSupported(true))
+    return watch.stop
+  }, [webMcpSupported])
+
   useEffect(() => {
     if (surface === 'directory') {
       const scopedEvents = selectedOrganisationId
@@ -1595,9 +1621,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           },
         }),
       ]
-      const registration = registerWebMcpTools(tools)
-      void registration.ready.catch(() => undefined)
-      return registration.unregister
+      return activateWebMcpTools(tools)
     }
 
     const isEventList = operationsOrganisationId === null && operationsEventId === null
@@ -2024,9 +2048,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           })
           })
 
-    const registration = registerWebMcpTools(tools)
-    void registration.ready.catch(() => undefined)
-    return registration.unregister
+    return activateWebMcpTools(tools)
   }, [
     operationsEventId,
     operationsOrganisationId,
@@ -2037,6 +2059,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     snapshotEventId,
     snapshotOrganisationId,
     surface,
+    webMcpSupported,
   ])
 
   const openEvent = (item: DemoEvent) => {
@@ -2287,6 +2310,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           <div className="footer-links"><button type="button" onClick={showDirectory}>Browse organisations</button><button type="button" onClick={showHowItWorks}>How it works</button></div>
         </div>
         {!webMcpSupported ? <p className="webmcp-compatibility">{webMcpCompatibilityGuidance}</p> : null}
+        {webMcpRegistrationError ? <p className="webmcp-compatibility">Site tools could not be registered: {webMcpRegistrationError}</p> : null}
       </footer>
 
       {selectedEvent ? (

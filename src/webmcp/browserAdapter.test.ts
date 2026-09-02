@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   hasWebMcpSupport,
   registerWebMcpTools,
+  watchWebMcpSupport,
   type WebMcpModelContext,
   type WebMcpTool,
 } from './browserAdapter'
@@ -76,5 +77,79 @@ describe('WebMCP browser adapter', () => {
     expect(registration.supported).toBe(false)
     await expect(registration.ready).resolves.toBeUndefined()
     expect(() => registration.unregister()).not.toThrow()
+  })
+
+  it('also calls unregisterTool by name when the browser offers it', async () => {
+    const { target, tools } = createCompatibleDocument()
+    const unregisterTool = vi.fn()
+    Object.assign(target.modelContext as WebMcpModelContext, { unregisterTool })
+
+    const registration = registerWebMcpTools([createTool('list_events'), createTool('check_in_attendee')], target)
+    await registration.ready
+    registration.unregister()
+
+    expect(unregisterTool).toHaveBeenCalledTimes(2)
+    expect(unregisterTool).toHaveBeenNthCalledWith(1, 'list_events')
+    expect(unregisterTool).toHaveBeenNthCalledWith(2, 'check_in_attendee')
+    expect(tools).toHaveLength(0)
+  })
+
+  it('surfaces a rejected registration through the ready promise', async () => {
+    const target = {
+      modelContext: {
+        registerTool: vi.fn(async () => {
+          throw new TypeError('inputSchema must be an object')
+        }),
+      },
+    } as unknown as Document
+
+    const registration = registerWebMcpTools([createTool('list_events')], target)
+
+    await expect(registration.ready).rejects.toThrow('inputSchema must be an object')
+  })
+
+  it('notices WebMCP support that the browser injects after the page script runs', () => {
+    vi.useFakeTimers()
+    try {
+      const target = {} as { modelContext?: WebMcpModelContext }
+      const onSupported = vi.fn()
+
+      watchWebMcpSupport(onSupported, target as Document, { intervalMs: 100, timeoutMs: 1000 })
+      vi.advanceTimersByTime(300)
+      expect(onSupported).not.toHaveBeenCalled()
+
+      target.modelContext = { registerTool: vi.fn(async () => undefined) }
+      vi.advanceTimersByTime(100)
+      expect(onSupported).toHaveBeenCalledOnce()
+
+      vi.advanceTimersByTime(2000)
+      expect(onSupported).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops watching after the timeout or when asked', () => {
+    vi.useFakeTimers()
+    try {
+      const target = {} as { modelContext?: WebMcpModelContext }
+      const onSupported = vi.fn()
+
+      const timedOut = watchWebMcpSupport(onSupported, target as Document, { intervalMs: 100, timeoutMs: 300 })
+      vi.advanceTimersByTime(400)
+      target.modelContext = { registerTool: vi.fn(async () => undefined) }
+      vi.advanceTimersByTime(400)
+      expect(onSupported).not.toHaveBeenCalled()
+      timedOut.stop()
+
+      delete target.modelContext
+      const stopped = watchWebMcpSupport(onSupported, target as Document, { intervalMs: 100, timeoutMs: 1000 })
+      stopped.stop()
+      target.modelContext = { registerTool: vi.fn(async () => undefined) }
+      vi.advanceTimersByTime(400)
+      expect(onSupported).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

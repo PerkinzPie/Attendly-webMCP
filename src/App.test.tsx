@@ -324,6 +324,32 @@ describe('Attendly organisation directory', () => {
     expect(screen.queryByRole('button', { name: 'Browse public events' })).not.toBeInTheDocument()
   })
 
+  it('registers site tools when the browser exposes WebMCP after the first render', async () => {
+    render(<App operationsService={createTestOperationsService()} />)
+    expect(screen.getByText('Site tools require a WebMCP-enabled browser.')).toBeInTheDocument()
+
+    const tools = installModelContext()
+
+    await waitFor(() => expect(tools.has('search_public_events')).toBe(true), { timeout: 2000 })
+    expect(screen.queryByText('Site tools require a WebMCP-enabled browser.')).not.toBeInTheDocument()
+  })
+
+  it('shows why site tools could not be registered', async () => {
+    Object.defineProperty(document, 'modelContext', {
+      configurable: true,
+      value: {
+        async registerTool() {
+          throw new TypeError('inputSchema must be an object')
+        },
+      },
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    render(<App operationsService={createTestOperationsService()} />)
+
+    expect(await screen.findByText('Site tools could not be registered: inputSchema must be an object')).toBeInTheDocument()
+    expect(console.warn).toHaveBeenCalledWith('WebMCP: site tool registration failed. inputSchema must be an object')
+  })
+
   it('exposes reviewable event preparation tools on the events page', async () => {
     const service = createTestOperationsService()
     const tools = installModelContext()

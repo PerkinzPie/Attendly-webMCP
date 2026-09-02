@@ -72,6 +72,27 @@ The seed module also provides a reset-ready operations scenario for the
 synthetic “Riverside Community Workshop”: capacity 20, 16 registrations, 13
 initial check-ins, and fixed exception and anomaly records for rehearsal.
 
+### Testing in ChatGPT
+
+ChatGPT discovers site tools only in the built-in browser of the ChatGPT
+desktop app, following the [OpenAI WebMCP guide](https://learn.chatgpt.com/docs/webmcp).
+If the tools do not appear:
+
+1. Open the site in the ChatGPT desktop app's browser, not in ChatGPT on the
+   web or in another browser.
+2. Turn on **Enable site tools** under **Settings > Browser > Permissions**.
+3. Pick a model that supports WebMCP. The guide lists GPT-5.6 Sol and Terra;
+   Luna has site tools disabled, and Enterprise and Edu workspaces cannot use
+   them.
+4. Select **Site tools** in the address bar and choose **Available site
+   tools**. The public events page registers four tools, the organiser events
+   page three, and an event control room nine.
+
+The page footer reports what it sees. "Site tools require a WebMCP-enabled
+browser." means the browser never exposed `document.modelContext`. "Site tools
+could not be registered" shows the error the browser returned, which is also
+written to the console with a `WebMCP:` prefix.
+
 ## Run locally
 
 ### Prerequisites
