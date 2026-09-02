@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "deploy": "pnpm check && pnpm dlx wrangler@4 pages deploy --branch main",
     "preview": "vite preview"
   },
   "dependencies": {

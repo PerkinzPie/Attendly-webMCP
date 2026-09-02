@@ -19,14 +19,54 @@ The scoped journeys cover:
 - organiser event creation, attendance and check-in workflows; and
 - evacuation accountability using careful, non-certifying terminology.
 
-The current application presents a realistic public directory where
-organisations are the primary entities and each organisation owns its upcoming
-events. Six synthetic schools, PTAs, churches, venues, charities and clubs host
-18 searchable events. Visitors can open an organisation, filter its events,
-view event details and complete a reviewable free-ticket booking journey. The
-site uses the established Attendly visual identity while all organisation,
-event and booking data remains deterministic and synthetic. WebMCP tools will
-be added in subsequent stories.
+The application presents a realistic public directory where organisations are
+the primary entities and each organisation owns its upcoming events. Six
+synthetic schools, PTAs, churches, venues, charities and clubs host 18
+searchable events. Visitors can open an organisation, filter its events, view
+event details and complete a reviewable free-ticket booking journey.
+Organisers can open an event control room to check attendees in, review
+attendance anomalies and run an evacuation roll call. The site uses the
+established Attendly visual identity while all organisation, event and booking
+data remains deterministic and synthetic.
+
+## Live demo
+
+The production build is published at
+**<https://attendly-webmcp.pages.dev/>**.
+
+State lives in the browser's local storage, so every visitor gets their own
+copy of the synthetic dataset. The **Reset demo** button restores the
+deterministic starting state at any time.
+
+## WebMCP site tools
+
+Tools are registered through `document.modelContext.registerTool` and are
+scoped to the visible page. Leaving a page removes its tools. In a browser
+without WebMCP support every journey still works and a short compatibility
+notice is shown.
+
+| Page | Tool | Effect |
+| --- | --- | --- |
+| Public events | `search_public_events` | Read. Upcoming published events, optional free-text query, audience, age and date range |
+| Public events | `get_public_event_details` | Read. Public details, suitability and booking rules for one event |
+| Public events | `create_free_booking_draft` | Write. Renders a reviewable free-ticket draft; nothing is persisted |
+| Public events | `confirm_free_booking` | Write, confirmed. Creates one booking from the visible draft |
+| Organiser events | `list_events` | Read. Events the organiser manages |
+| Organiser events | `create_event_draft` | Write. Renders a reviewable event draft |
+| Organiser events | `confirm_event_creation` | Write, confirmed. Creates the drafted event |
+| Event control room | `get_event_snapshot` | Read. Live totals, revision and anomalies for the open event |
+| Event control room | `find_attendee` | Read. Attendee search with grouped registrations |
+| Event control room | `get_attendance_anomalies` | Read. Capacity risk and duplicate-registration candidates |
+| Event control room | `check_in_attendee` | Write, confirmed. Checks in one registered attendee |
+| Event control room | `start_evacuation_accountability` | Write, confirmed. Starts a roll call for checked-in attendees |
+| Event control room | `get_unconfirmed_attendees` | Read. Attendees not yet accounted for in the active roll call |
+| Event control room | `record_accountability_status` | Write, confirmed. Marks one attendee accounted for or unconfirmed |
+| Event control room | `generate_incident_summary` | Read. Factual roll-call summary without inferring physical safety |
+| Event control room | `close_evacuation_accountability` | Write, confirmed. Closes the roll call and records the closure |
+
+Every write tool is `readOnlyHint: false`, asks for explicit confirmation in
+the page before changing state, and returns the same data the interface
+displays.
 
 The seed module also provides a reset-ready operations scenario for the
 synthetic “Riverside Community Workshop”: capacity 20, 16 registrations, 13
@@ -66,14 +106,34 @@ Or run an individual command:
 | `pnpm test` | Deterministic automated tests |
 | `pnpm build` | Production build |
 | `pnpm preview` | Preview the production output locally |
+| `pnpm deploy` | Run all checks, then publish `dist/` to Cloudflare Pages |
+
+## Deployment
+
+The site is a static single-page application deployed to Cloudflare Pages.
+No datastore, environment variables or secrets are required.
+
+```sh
+wrangler login      # once, on your machine
+pnpm deploy         # blocked unless lint, types, tests and build all pass
+```
+
+`wrangler.jsonc` names the Pages project (`attendly-webmcp`) and the build
+output directory. The GitHub Actions **Deploy** workflow performs the same
+steps on every push to `main` when the `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` repository secrets are configured; without them the
+workflow skips deployment and the last published release stays live.
 
 ## Project structure
 
 ```text
 src/
+├── application/ Shared services used by the UI and the WebMCP tools
 ├── demo/        Synthetic seed data
+├── domain/      Event, attendance and accountability rules
 ├── test/        Shared test setup
-├── App.tsx      Event discovery and booking experience
+├── webmcp/      Page-scoped tool contracts and the browser adapter
+├── App.tsx      Public directory, organiser events and control room
 └── main.tsx     Browser entry point
 ```
 
