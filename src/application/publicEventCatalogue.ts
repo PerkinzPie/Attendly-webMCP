@@ -5,11 +5,17 @@ import type {
 } from '../demo/seed'
 
 export type PublicEventSearchInput = {
-  readonly fromDate: string
-  readonly toDate: string
+  readonly fromDate?: string
+  readonly toDate?: string
+  readonly query?: string
   readonly audience?: PublicEventAudience
   readonly age?: number
   readonly organisationId?: string
+}
+
+export type PublicEventSearchRange = {
+  readonly fromDate: string
+  readonly toDate: string
 }
 
 export type PublicEventAvailability = {
@@ -78,8 +84,13 @@ export type PublicEventCatalogueResult<T> =
   | { readonly ok: true, readonly data: T }
   | { readonly ok: false, readonly error: PublicEventCatalogueError }
 
+export type PublicEventSearchResult = {
+  readonly range: PublicEventSearchRange
+  readonly events: readonly PublicEventSummary[]
+}
+
 export type PublicEventCatalogue = {
-  search(input: PublicEventSearchInput): PublicEventCatalogueResult<readonly PublicEventSummary[]>
+  search(input: PublicEventSearchInput): PublicEventCatalogueResult<PublicEventSearchResult>
   getDetails(eventId: string, organisationId?: string): PublicEventCatalogueResult<PublicEventDetails>
 }
 
@@ -102,6 +113,31 @@ function sixMonthsAfter(date: Date) {
   const result = new Date(date)
   result.setUTCMonth(result.getUTCMonth() + 6)
   return result
+}
+
+function toDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function localDateOnly(date: Date) {
+  const offset = date.getTimezoneOffset() * 60_000
+  return toDateOnly(new Date(date.getTime() - offset))
+}
+
+function normaliseQuery(value: string | undefined) {
+  return value?.trim().toLocaleLowerCase('en-GB') ?? ''
+}
+
+function matchesQuery(event: DemoEvent, organisation: DemoOrganisation | undefined, query: string) {
+  if (!query) return true
+  const haystack = [
+    event.name,
+    event.venue,
+    event.category,
+    organisation?.name ?? '',
+    organisation?.location ?? '',
+  ].join(' ').toLocaleLowerCase('en-GB')
+  return query.split(/\s+/).every((term) => haystack.includes(term))
 }
 
 function availabilityFor(event: DemoEvent, reservedTickets: number): PublicEventAvailability {
@@ -151,16 +187,22 @@ function summaryFor(
 export function createPublicEventCatalogue(
   events: readonly DemoEvent[],
   organisations: readonly DemoOrganisation[],
-  options: { readonly getReservedTickets?: (eventId: string) => number | null } = {},
+  options: {
+    readonly getReservedTickets?: (eventId: string) => number | null
+    readonly today?: () => string
+  } = {},
 ): PublicEventCatalogue {
   const organisationsById = new Map(organisations.map((organisation) => [organisation.id, organisation]))
   const eventsById = new Map(events.map((event) => [event.id, event]))
   const reservedTicketsFor = (event: DemoEvent) => options.getReservedTickets?.(event.id) ?? event.reservedTickets
+  const today = options.today ?? (() => localDateOnly(new Date()))
 
   return {
     search(input) {
-      const fromDate = parseDateOnly(input.fromDate)
-      const toDate = parseDateOnly(input.toDate)
+      const fromValue = input.fromDate ?? today()
+      const fromDate = parseDateOnly(fromValue)
+      const toValue = input.toDate ?? (fromDate ? toDateOnly(sixMonthsAfter(fromDate)) : '')
+      const toDate = parseDateOnly(toValue)
       if (!fromDate || !toDate) {
         return {
           ok: false,
@@ -216,12 +258,14 @@ export function createPublicEventCatalogue(
         }
       }
 
+      const query = normaliseQuery(input.query)
       const matches = events
         .filter((event) => {
           if (event.publicationStatus !== 'published') return false
           if (input.organisationId && event.organisationId !== input.organisationId) return false
           const eventDate = event.startsAt.slice(0, 10)
-          if (eventDate < input.fromDate || eventDate > input.toDate) return false
+          if (eventDate < fromValue || eventDate > toValue) return false
+          if (!matchesQuery(event, organisationsById.get(event.organisationId), query)) return false
           if (input.audience && !event.audiences.includes(input.audience)) return false
           if (input.age !== undefined) {
             if (event.ageGuidance.minAge === undefined || event.ageGuidance.maxAge === undefined) return false
@@ -235,7 +279,13 @@ export function createPublicEventCatalogue(
           return organisation ? [summaryFor(event, organisation, reservedTicketsFor(event))] : []
         })
 
-      return { ok: true, data: matches }
+      return {
+        ok: true,
+        data: {
+          range: { fromDate: fromValue, toDate: toValue },
+          events: matches,
+        },
+      }
     },
 
     getDetails(eventId, organisationId) {

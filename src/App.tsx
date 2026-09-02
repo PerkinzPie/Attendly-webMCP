@@ -1491,14 +1491,19 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               ...(selectedOrganisationId ? { organisationId: selectedOrganisationId } : {}),
             })
             if (!result.ok) return webMcpError(result.error.code, result.error.message)
-            return webMcpResult(`Found ${result.data.length} published events.`, {
-              ok: true,
-              scope: selectedOrganisationId
-                ? { organisationId: selectedOrganisationId }
-                : { organisationId: null },
-              query: input,
-              events: result.data,
-            })
+            const { range, events } = result.data
+            return webMcpResult(
+              `Found ${events.length} published events between ${range.fromDate} and ${range.toDate}.`,
+              {
+                ok: true,
+                scope: selectedOrganisationId
+                  ? { organisationId: selectedOrganisationId }
+                  : { organisationId: null },
+                range,
+                filters: input,
+                events,
+              },
+            )
           },
           getPublicEventDetails: (eventId) => {
             const result = publicEventCatalogue.getDetails(eventId, selectedOrganisationId ?? undefined)

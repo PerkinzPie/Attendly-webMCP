@@ -14,12 +14,12 @@ describe('public event catalogue', () => {
 
     expect(result).toMatchObject({ ok: true })
     if (!result.ok) return
-    expect(result.data.map((event) => event.eventId)).toEqual([
+    expect(result.data.events.map((event) => event.eventId)).toEqual([
       'evt_autumn_fair',
       'evt_online_safety',
       'evt_reception_welcome',
     ])
-    expect(result.data[0]).toMatchObject({
+    expect(result.data.events[0]).toMatchObject({
       ticketing: { isFree: true, pricePence: 0, currency: 'GBP' },
       suitability: {
         audiences: expect.arrayContaining(['families', 'children']),
@@ -39,9 +39,32 @@ describe('public event catalogue', () => {
 
     expect(result).toMatchObject({ ok: true })
     if (!result.ok) return
-    expect(result.data.map((event) => event.eventId)).toContain('evt_toddler_music')
-    expect(result.data.map((event) => event.eventId)).not.toContain('evt_coding_club')
-    expect(result.data.every((event) => event.suitability.ageGuidance.minAge !== undefined)).toBe(true)
+    expect(result.data.events.map((event) => event.eventId)).toContain('evt_toddler_music')
+    expect(result.data.events.map((event) => event.eventId)).not.toContain('evt_coding_club')
+    expect(result.data.events.every((event) => event.suitability.ageGuidance.minAge !== undefined)).toBe(true)
+  })
+
+  it('defaults to the next six months from today and matches free-text queries', () => {
+    const dated = createPublicEventCatalogue(demoEvents, demoOrganisations, { today: () => '2026-09-02' })
+
+    const upcoming = dated.search({})
+    expect(upcoming).toMatchObject({ ok: true, data: { range: { fromDate: '2026-09-02', toDate: '2027-03-02' } } })
+    if (!upcoming.ok) return
+    expect(upcoming.data.events.length).toBeGreaterThan(0)
+
+    const willowbrook = dated.search({ query: 'willowbrook' })
+    expect(willowbrook).toMatchObject({ ok: true })
+    if (!willowbrook.ok) return
+    expect(willowbrook.data.events.length).toBeGreaterThan(0)
+    expect(willowbrook.data.events.every((event) => (
+      /willowbrook/i.test(`${event.name} ${event.organisation.name}`)
+    ))).toBe(true)
+
+    const none = dated.search({ query: 'no such event anywhere' })
+    expect(none).toEqual({
+      ok: true,
+      data: { range: { fromDate: '2026-09-02', toDate: '2027-03-02' }, events: [] },
+    })
   })
 
   it('rejects an excessive range and returns public details without private records', () => {

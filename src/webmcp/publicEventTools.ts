@@ -2,8 +2,9 @@ import type { PublicEventAudience } from '../demo/seed'
 import type { WebMcpTool } from './browserAdapter'
 
 export type PublicEventSearchToolInput = {
-  readonly fromDate: string
-  readonly toDate: string
+  readonly fromDate?: string
+  readonly toDate?: string
+  readonly query?: string
   readonly audience?: PublicEventAudience
   readonly age?: number
 }
@@ -15,6 +16,11 @@ export type PublicEventToolHandlers = {
 
 function stringInput(input: Record<string, unknown>, key: string) {
   return typeof input[key] === 'string' ? input[key] : ''
+}
+
+function optionalString(input: Record<string, unknown>, key: string) {
+  const value = stringInput(input, key)
+  return value ? { [key]: value } : {}
 }
 
 function numberInput(input: Record<string, unknown>, key: string) {
@@ -34,19 +40,24 @@ export function createPublicEventTools(
     {
       name: 'search_public_events',
       title: 'Search public events',
-      description: 'Search published events on the current public page within a maximum six-month date range. Suitability matches use only organiser-authored audience and age metadata.',
+      description: 'Search published events on the current public page. With no dates it returns upcoming events for the next six months. An optional free-text query matches event, organisation, venue and category names. Suitability matches use only organiser-authored audience and age metadata.',
       inputSchema: {
         type: 'object',
         properties: {
+          query: {
+            type: 'string',
+            maxLength: 80,
+            description: 'Optional free-text filter matched against event name, organisation name, venue and category, for example "Willowbrook".',
+          },
           fromDate: {
             type: 'string',
             format: 'date',
-            description: 'Inclusive search start date in YYYY-MM-DD format.',
+            description: 'Optional inclusive search start date in YYYY-MM-DD format. Defaults to today.',
           },
           toDate: {
             type: 'string',
             format: 'date',
-            description: 'Inclusive search end date, no more than six calendar months after fromDate.',
+            description: 'Optional inclusive search end date, no more than six calendar months after fromDate. Defaults to six months after fromDate.',
           },
           audience: {
             type: 'string',
@@ -60,13 +71,13 @@ export function createPublicEventTools(
             description: 'Optional child age matched only when the organiser supplied a numeric age range.',
           },
         },
-        required: ['fromDate', 'toDate'],
         additionalProperties: false,
       },
       annotations: readOnlyAnnotations,
       execute: (input) => handlers.searchPublicEvents({
-        fromDate: stringInput(input, 'fromDate'),
-        toDate: stringInput(input, 'toDate'),
+        ...optionalString(input, 'fromDate'),
+        ...optionalString(input, 'toDate'),
+        ...optionalString(input, 'query'),
         ...(stringInput(input, 'audience')
           ? { audience: stringInput(input, 'audience') as PublicEventAudience }
           : {}),
