@@ -672,12 +672,6 @@ function EventNotFound({
   )
 }
 
-function accountabilityStatusLabel(status: AccountabilityStatus) {
-  if (status === 'accounted-for') return 'Accounted for'
-  if (status === 'exempt-not-present') return 'Not present'
-  return 'Unconfirmed'
-}
-
 function AccountabilityWorkspace({
   snapshot,
   attendees,
@@ -718,10 +712,6 @@ function AccountabilityWorkspace({
     }
     const record = activeSession?.records.find((item) => item.attendeeId === attendeeId)
     if (!record) return
-    if (record.status !== 'unconfirmed' && record.status !== status && !window.confirm(
-      `Change ${record.attendeeName} from ${accountabilityStatusLabel(record.status)} to ${accountabilityStatusLabel(status)}? The earlier update will remain in Activity.`,
-    )) return false
-
     const result = onRecordAccountabilityStatus({
       attendeeId: record.attendeeId,
       status,
@@ -1437,8 +1427,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   }
 
   const requestReset = () => {
-    if (!window.confirm('Reset demo?')) return
-
     const result = service.resetDemo({ actor: demoUiActor })
     if (!result.ok) {
       const message = 'Reset failed. Please try again.'
@@ -1575,11 +1563,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
                 { requiresNewDraft: true },
               )
             }
-            if (!window.confirm(
-              `Confirm ${draft.quantities.total} free tickets for ${draft.event.name} (${draft.quantities.adultTickets} adult, ${draft.quantities.childTickets} child)?`,
-            )) {
-              return webMcpError('confirmation_declined', 'The free booking was not confirmed.')
-            }
 
             const result = publicBookingService.confirmDraft(input)
             if (!result.ok) {
@@ -1691,10 +1674,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               return webMcpError('stale_event_draft', 'The matching event draft is no longer active.')
             }
 
-            const organisationName = organisationsById.get(draft.organisationId)?.name ?? 'this organisation'
-            if (!window.confirm(`Create “${draft.name}” for ${organisationName}?`)) {
-              return webMcpError('confirmation_declined', 'Event creation was not confirmed.')
-            }
 
             const result = service.confirmEventDraft({ draft, actor: demoToolActor })
             if (!result.ok) return webMcpError(result.error.code, result.error.message)
@@ -1831,17 +1810,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               })
               if (!review.ok) return webMcpError(review.error.code, review.error.message)
 
-              flushSync(() => setActiveCheckInReview(review.data))
-              setOperationsAnnouncement(`${attendee.name} check-in ready for review.`)
-              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-              const reviewElement = document.getElementById('attendee-check-in-review')
-              if (reviewElement && typeof reviewElement.scrollIntoView === 'function') {
-                reviewElement.scrollIntoView({ block: 'nearest' })
-              }
-              if (!window.confirm(`Check in ${attendee.name}? Occupancy will change from ${review.data.currentOccupancy} to ${review.data.projectedOccupancy} of ${review.data.capacity}.`)) {
-                setActiveCheckInReview(null)
-                return webMcpError('confirmation_declined', 'Attendee check-in was not confirmed.')
-              }
 
               const result = service.checkInAttendee({
                 attendeeId: attendee.attendeeId,
@@ -1880,10 +1848,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
                   return webMcpError('accountability_already_exists', 'An accountability session already exists for this event.')
                 }
 
-                const expectedAttendees = active.snapshot.checkedInCount
-                if (!window.confirm(`Start roll call for ${expectedAttendees} checked-in attendees? Updates will be recorded in Activity.`)) {
-                  return webMcpError('confirmation_declined', 'Starting the roll call was not confirmed.')
-                }
 
                 const result = service.startAccountability({ actor: demoToolActor })
                 if (!result.ok) return webMcpError(result.error.code, result.error.message)
@@ -1936,9 +1900,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
                 }
                 if (record.status !== 'unconfirmed') {
                   return webMcpError('attendee_not_unconfirmed', `${record.attendeeName} is not currently unconfirmed.`)
-                }
-                if (!window.confirm(`Mark ${record.attendeeName} as accounted for?`)) {
-                  return webMcpError('confirmation_declined', 'The accountability update was not confirmed.')
                 }
 
                 const note = input.note.trim()
@@ -2019,10 +1980,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               closeAccountability: (eventId) => {
                 const active = readActiveAccountability(eventId)
                 if (!active.ok) return active.result
-                const unresolved = active.session.totals.unconfirmed
-                if (!window.confirm(`Close roll call with ${unresolved} unconfirmed?`)) {
-                  return webMcpError('confirmation_declined', 'Closing the roll call was not confirmed.')
-                }
 
                 const result = service.closeAccountability({ actor: demoToolActor })
                 if (!result.ok) return webMcpError(result.error.code, result.error.message)
@@ -2129,9 +2086,6 @@ function App({ operationsService }: { operationsService?: EventOperationsService
       setBookingStage('details')
       return
     }
-    if (!window.confirm(
-      `Confirm ${draft.quantities.total} free tickets for ${draft.event.name} (${draft.quantities.adultTickets} adult, ${draft.quantities.childTickets} child)?`,
-    )) return
 
     const result = publicBookingService.confirmDraft({
       draftId: draft.draftId,

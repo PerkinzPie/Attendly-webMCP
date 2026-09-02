@@ -18,7 +18,7 @@ export function createAttendeeCheckInTool(
   return {
     name: 'check_in_attendee',
     title: 'Check in attendee',
-    description: 'Prepare a review for one attendee identified by a stable ID, ask for confirmation, then check them into the active event exactly once.',
+    description: 'Check one attendee identified by a stable ID into the active event exactly once, recording the given reason in the activity timeline.',
     inputSchema: {
       type: 'object',
       properties: {

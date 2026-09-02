@@ -50,7 +50,7 @@ export function createAccountabilityTools(
     {
       name: 'start_evacuation_accountability',
       title: 'Start evacuation accountability',
-      description: 'Present the checked-in attendee count for confirmation, then start one audited accountability session for the active event.',
+      description: 'Start one audited accountability session (roll call) for the checked-in attendees of the active event. Fails if a session already exists.',
       inputSchema: eventInputSchema,
       annotations: writeAnnotations,
       execute: (input) => handlers.startAccountability(stringInput(input, 'eventId')),
@@ -66,7 +66,7 @@ export function createAccountabilityTools(
     {
       name: 'record_accountability_status',
       title: 'Record accountability status',
-      description: 'Ask for confirmation, then record one identified unconfirmed attendee as accounted for in the active session.',
+      description: 'Record one identified unconfirmed attendee as accounted for in the active accountability session. The change is audited and visible on the page.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -108,7 +108,7 @@ export function createAccountabilityTools(
     {
       name: 'close_evacuation_accountability',
       title: 'Close evacuation accountability',
-      description: 'Present the unresolved total for confirmation, then close and audit the active accountability session.',
+      description: 'Close the active accountability session and audit the closure, reporting how many attendees remain unconfirmed.',
       inputSchema: eventInputSchema,
       annotations: writeAnnotations,
       execute: (input) => handlers.closeAccountability(stringInput(input, 'eventId')),

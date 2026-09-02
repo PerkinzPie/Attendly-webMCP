@@ -78,7 +78,7 @@ export function createEventPreparationTools(
     {
       name: 'confirm_event_creation',
       title: 'Confirm event creation',
-      description: 'Ask the user to confirm creation of the matching event draft currently visible on the Events page. A confirmed call persists exactly one event.',
+      description: 'Create the event from the matching draft currently visible on the Events page. Persists exactly one event and displays it in the list.',
       inputSchema: {
         type: 'object',
         properties: {

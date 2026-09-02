@@ -197,7 +197,6 @@ describe('Attendly organisation directory', () => {
 
   it('renders, confirms and reconciles a free booking prepared through WebMCP', async () => {
     const tools = installModelContext()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<App operationsService={createTestOperationsService()} />)
 
     await waitFor(() => expect(tools.has('create_free_booking_draft')).toBe(true))
@@ -239,17 +238,8 @@ describe('Attendly organisation directory', () => {
     expect(within(dialog).getByText('Nothing is booked until you confirm below.')).toBeInTheDocument()
 
     const draftId = draftResult?.structuredContent.draft.draftId ?? ''
-    const declined = await tools.get('confirm_free_booking')?.execute({
-      draftId,
-      idempotencyKey: 'booking-attempt-1',
-    }) as { structuredContent: { error: { code: string } } }
-    expect(confirm).toHaveBeenLastCalledWith(
-      'Confirm 3 free tickets for Willowbrook Autumn Fair (1 adult, 2 child)?',
-    )
-    expect(declined.structuredContent.error.code).toBe('confirmation_declined')
     expect(within(dialog).queryByText('Booking reference')).not.toBeInTheDocument()
 
-    confirm.mockReturnValue(true)
     let confirmed: {
       structuredContent: {
         idempotent: boolean
@@ -391,27 +381,18 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('Capacity is low; check it before creating the event.')).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
 
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const confirmTool = tools.get('confirm_event_creation')
     const staleResult = await confirmTool?.execute({ draftId: 'draft_stale' }) as {
       structuredContent: { error: { code: string } }
     }
     expect(staleResult.structuredContent.error.code).toBe('stale_event_draft')
-    expect(confirm).not.toHaveBeenCalled()
-
-    const draftId = draftResult?.structuredContent.draft.id ?? ''
-    const declinedResult = await confirmTool?.execute({ draftId }) as {
-      structuredContent: { error: { code: string } }
-    }
-    expect(declinedResult.structuredContent.error.code).toBe('confirmation_declined')
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [] } })
 
-    confirm.mockReturnValue(true)
+    const draftId = draftResult?.structuredContent.draft.id ?? ''
     await act(async () => {
       await confirmTool?.execute({ draftId })
     })
 
-    expect(confirm).toHaveBeenLastCalledWith('Create “Family Games Night” for The Old Market Rooms?')
     expect(screen.getByRole('heading', { level: 2, name: 'Family Games Night' })).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({
       ok: true,
@@ -624,11 +605,6 @@ describe('Attendly organisation directory', () => {
     })
     expect(service.getSnapshot()).toEqual(before)
 
-    const confirm = vi.spyOn(window, 'confirm').mockImplementation(() => {
-      const review = screen.getByRole('group', { name: 'Confirm check-in for Sarah Jenkins' })
-      expect(within(review).getByText('Not arrived · Occupancy 13 → 14 of 20')).toBeInTheDocument()
-      return true
-    })
     let confirmed: {
       structuredContent: {
         idempotent: boolean
@@ -677,7 +653,6 @@ describe('Attendly organisation directory', () => {
       activityId: confirmed?.structuredContent.activityId,
       revision: 1,
     })
-    expect(confirm).toHaveBeenCalledTimes(1)
 
     const snapshot = service.getSnapshot()
     expect(snapshot.ok && snapshot.data.activityTimeline.filter((entry) => (
@@ -688,7 +663,6 @@ describe('Attendly organisation directory', () => {
   it('exposes confirmed, audited evacuation accountability tools', async () => {
     const service = createTestOperationsService()
     const tools = installModelContext()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<App operationsService={service} />)
     openManagedEvent()
 
@@ -700,18 +674,7 @@ describe('Attendly organisation directory', () => {
     const closeTool = tools.get('close_evacuation_accountability')
     expect(unconfirmedTool?.annotations?.readOnlyHint).toBe(true)
     expect(summaryTool?.annotations?.readOnlyHint).toBe(true)
-    const before = service.getSnapshot()
 
-    const declinedStart = await startTool?.execute({
-      eventId: 'evt_riverside_community_workshop',
-    }) as { structuredContent: { error: { code: string } } }
-    expect(confirm).toHaveBeenLastCalledWith(
-      'Start roll call for 13 checked-in attendees? Updates will be recorded in Activity.',
-    )
-    expect(declinedStart.structuredContent.error.code).toBe('confirmation_declined')
-    expect(service.getSnapshot()).toEqual(before)
-
-    confirm.mockReturnValue(true)
     let started: {
       structuredContent: {
         sessionId: string
@@ -766,18 +729,6 @@ describe('Attendly organisation directory', () => {
     }) as { structuredContent: { error: { code: string } } }
     expect(invalidStatus.structuredContent.error.code).toBe('invalid_status')
 
-    confirm.mockReturnValue(false)
-    const declinedRecord = await recordTool?.execute({
-      eventId: 'evt_riverside_community_workshop',
-      attendeeId: 'att_amina_patel',
-      status: 'accounted_for',
-      note: 'At the east assembly point.',
-    }) as { structuredContent: { error: { code: string } } }
-    expect(confirm).toHaveBeenLastCalledWith('Mark Amina Patel as accounted for?')
-    expect(declinedRecord.structuredContent.error.code).toBe('confirmation_declined')
-    expect(service.getSnapshot()).toEqual(afterStart)
-
-    confirm.mockReturnValue(true)
     let recorded: {
       structuredContent: {
         previousState: { status: string }
@@ -834,14 +785,6 @@ describe('Attendly organisation directory', () => {
     expect(summary.structuredContent.recordedFacts.unresolvedAttendees).toHaveLength(12)
     expect(summary.structuredContent.missingInformation.attendeeStatuses).toHaveLength(12)
 
-    confirm.mockReturnValue(false)
-    const declinedClose = await closeTool?.execute({
-      eventId: 'evt_riverside_community_workshop',
-    }) as { structuredContent: { error: { code: string } } }
-    expect(confirm).toHaveBeenLastCalledWith('Close roll call with 12 unconfirmed?')
-    expect(declinedClose.structuredContent.error.code).toBe('confirmation_declined')
-
-    confirm.mockReturnValue(true)
     let closed: {
       structuredContent: {
         sessionId: string
@@ -878,7 +821,6 @@ describe('Attendly organisation directory', () => {
 
   it('provides a one-click roll check with optional notes and auditable corrections', () => {
     const service = createTestOperationsService()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App operationsService={service} />)
     openManagedEvent()
 
@@ -900,7 +842,6 @@ describe('Attendly organisation directory', () => {
     workspace = screen.getByRole('region', { name: 'Roll call' })
     expect(within(workspace).getByText('1 of 13').parentElement).toHaveTextContent('1 of 13 accounted for')
     aminaRow = within(workspace).getByText('Amina Patel').closest('li')
-    expect(confirm).not.toHaveBeenCalled()
     expect(within(aminaRow as HTMLElement).getByRole('checkbox', { name: 'Amina Patel' })).toBeChecked()
 
     expect(within(aminaRow as HTMLElement).queryByLabelText('Note for Amina Patel')).not.toBeInTheDocument()
@@ -917,10 +858,6 @@ describe('Attendly organisation directory', () => {
 
     fireEvent.click(within(aminaRow as HTMLElement).getByRole('checkbox', { name: /Amina Patel/ }))
 
-    expect(confirm).toHaveBeenNthCalledWith(
-      1,
-      'Change Amina Patel from Accounted for to Unconfirmed? The earlier update will remain in Activity.',
-    )
     workspace = screen.getByRole('region', { name: 'Roll call' })
     expect(within(workspace).getByText('0 of 13').parentElement).toHaveTextContent('0 of 13 accounted for')
     fireEvent.click(within(workspace).getByRole('button', { name: 'Hide roll call' }))
@@ -1239,23 +1176,10 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('0 issues')).toBeInTheDocument()
   })
 
-  it('does not reset persisted state before confirmation and supports cancellation', () => {
-    const service = createTestOperationsService()
-    expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
-    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    render(<App operationsService={service} />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reset demo' }))
-
-    expect(confirmReset).toHaveBeenCalledWith('Reset demo?')
-    expect(service.getSnapshot()).toMatchObject({ ok: true, data: { checkedInCount: 14 } })
-  })
-
   it('resets changed persisted and visible state from the site header while an event is open', () => {
     const service = createTestOperationsService()
     expect(service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
     expect(service.startAccountability({ actor: organiser }).ok).toBe(true)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App operationsService={service} />)
     openOrganisation('Willowbrook Primary School')
     const eventRow = screen.getByRole('heading', { name: 'Willowbrook Autumn Fair' }).closest('article')
@@ -1283,7 +1207,6 @@ describe('Attendly organisation directory', () => {
   it('shows a recoverable reset error without claiming success when persistence fails', () => {
     const harness = createTestOperationsHarness()
     expect(harness.service.checkInAttendee({ attendeeId: 'att_sarah_jenkins', actor: organiser }).ok).toBe(true)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
     render(<App operationsService={harness.service} />)
     openManagedEvent()

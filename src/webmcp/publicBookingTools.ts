@@ -86,7 +86,7 @@ export function createPublicBookingTools(
     {
       name: 'confirm_free_booking',
       title: 'Confirm free booking',
-      description: 'Ask the user to confirm the matching visible draft, then create exactly one free booking and return the same reference displayed on the page.',
+      description: 'Create exactly one free booking from the matching draft visible on the page and return the same booking reference the page displays.',
       inputSchema: {
         type: 'object',
         properties: {

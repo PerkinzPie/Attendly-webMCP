@@ -64,9 +64,9 @@ notice is shown.
 | Event control room | `generate_incident_summary` | Read. Factual roll-call summary without inferring physical safety |
 | Event control room | `close_evacuation_accountability` | Write, confirmed. Closes the roll call and records the closure |
 
-Every write tool is `readOnlyHint: false`, asks for explicit confirmation in
-the page before changing state, and returns the same data the interface
-displays.
+Every write tool is `readOnlyHint: false`, names its side effect in its
+description so the agent's normal confirmation policy applies, and returns
+the same data the interface displays.
 
 The seed module also provides a reset-ready operations scenario for the
 synthetic “Riverside Community Workshop”: capacity 20, 16 registrations, 13
