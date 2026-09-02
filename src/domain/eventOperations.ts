@@ -564,6 +564,39 @@ function normaliseText(value: string) {
   return value.trim().replace(/\s+/g, ' ')
 }
 
+const eventTimeZone = 'Europe/London'
+const wallClockPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/
+
+function timeZoneOffsetMinutes(at: Date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: eventTimeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(at)
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
+  const local = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'))
+  return (local - at.getTime()) / 60_000
+}
+
+/**
+ * Event start times entered without an offset (for example from a
+ * datetime-local input or an agent) are UK wall-clock times. Interpreting
+ * them in Europe/London keeps stored instants identical regardless of the
+ * organiser's device or the server's time zone.
+ */
+export function parseEventStart(value: string) {
+  if (!wallClockPattern.test(value)) return new Date(value)
+  const guess = new Date(`${value}Z`)
+  if (Number.isNaN(guess.getTime())) return guess
+  const firstPass = new Date(guess.getTime() - timeZoneOffsetMinutes(guess) * 60_000)
+  return new Date(guess.getTime() - timeZoneOffsetMinutes(firstPass) * 60_000)
+}
+
 export function prepareEventDraft(
   input: EventDraftInput,
   command: PrepareEventDraftCommand,
@@ -571,7 +604,7 @@ export function prepareEventDraft(
   const organisationId = input.organisationId.trim()
   const name = normaliseText(input.name)
   const venue = normaliseText(input.venue)
-  const parsedStartsAt = new Date(input.startsAt)
+  const parsedStartsAt = parseEventStart(input.startsAt)
   const startsAt = Number.isNaN(parsedStartsAt.getTime()) ? '' : parsedStartsAt.toISOString()
   const errors: EventDraftIssue[] = []
   const warnings: EventDraftIssue[] = []

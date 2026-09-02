@@ -18,6 +18,7 @@ import {
   startAccountabilitySession,
   type OperationsActor,
 } from './eventOperations'
+import { parseEventStart } from './eventOperations'
 
 const organiser: OperationsActor = {
   id: 'actor_demo_organiser',
@@ -518,5 +519,17 @@ describe('event operations domain', () => {
 
     expect(publicAccountabilityState).toContain('unconfirmed')
     expect(publicAccountabilityState).not.toMatch(/\b(safe|missing|inside)\b/)
+  })
+})
+
+describe('parseEventStart', () => {
+  it('interprets wall-clock input as Europe/London regardless of the runtime time zone', () => {
+    expect(parseEventStart('2026-10-10T18:30').toISOString()).toBe('2026-10-10T17:30:00.000Z')
+    expect(parseEventStart('2026-12-10T18:30').toISOString()).toBe('2026-12-10T18:30:00.000Z')
+  })
+
+  it('keeps explicit offsets and rejects invalid values', () => {
+    expect(parseEventStart('2026-10-10T18:30:00+02:00').toISOString()).toBe('2026-10-10T16:30:00.000Z')
+    expect(Number.isNaN(parseEventStart('not a date').getTime())).toBe(true)
   })
 })

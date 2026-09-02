@@ -213,6 +213,7 @@ function formatEventDate(startsAt: string) {
   return new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Europe/London',
   }).format(new Date(startsAt))
 }
 
@@ -2371,7 +2372,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
                 <dl className="booking-review">
                   <div><dt>Organisation</dt><dd>{selectedOrganisation ? formatOrganisationContext(selectedOrganisation) : ''}</dd></div><div><dt>Event</dt><dd>{selectedEvent.name}</dd></div><div><dt>Date</dt><dd>{selectedEvent.dateLabel}, {selectedEvent.timeLabel}</dd></div><div><dt>Places</dt><dd>{activeBookingDraft.quantities.total}</dd></div><div><dt>Adult tickets</dt><dd>{activeBookingDraft.quantities.adultTickets}</dd></div><div><dt>Child tickets</dt><dd>{activeBookingDraft.quantities.childTickets}</dd></div><div><dt>Booked by</dt><dd>{activeBookingDraft.guardian.name}</dd></div><div><dt>Confirmation</dt><dd>{activeBookingDraft.guardian.email}</dd></div><div><dt>Total</dt><dd>{activeBookingDraft.price.display}</dd></div>
                 </dl>
-                <p className="dialog-intro">This draft expires at {new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(new Date(activeBookingDraft.expiresAt))}. Current availability: {activeBookingDraft.availability.remaining} places.</p>
+                <p className="dialog-intro">This draft expires at {formatUpdatedTime(activeBookingDraft.expiresAt)}. Current availability: {activeBookingDraft.availability.remaining} places.</p>
                 <button className="button button-primary button-wide" type="button" onClick={confirmVisibleBooking}>Confirm free booking</button>
               </div>
             ) : null}
