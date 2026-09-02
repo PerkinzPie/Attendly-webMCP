@@ -51,7 +51,7 @@ export type DemoEvent = {
   venue: string
   category: EventCategory
   publicationStatus: 'published'
-  pricePence: 0
+  pricePence: number
   audiences: readonly PublicEventAudience[]
   ageGuidance: PublicEventAgeGuidance
   capacity: number

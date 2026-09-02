@@ -104,11 +104,11 @@ function sixMonthsAfter(date: Date) {
   return result
 }
 
-function availabilityFor(event: DemoEvent): PublicEventAvailability {
-  const remaining = Math.max(0, event.capacity - event.reservedTickets)
+function availabilityFor(event: DemoEvent, reservedTickets: number): PublicEventAvailability {
+  const remaining = Math.max(0, event.capacity - reservedTickets)
   return {
     capacity: event.capacity,
-    reserved: event.reservedTickets,
+    reserved: reservedTickets,
     remaining,
     soldOut: remaining === 0,
   }
@@ -117,6 +117,7 @@ function availabilityFor(event: DemoEvent): PublicEventAvailability {
 function summaryFor(
   event: DemoEvent,
   organisation: DemoOrganisation,
+  reservedTickets: number,
 ): PublicEventSummary {
   return {
     eventId: event.id,
@@ -143,16 +144,18 @@ function summaryFor(
       ageGuidance: event.ageGuidance,
       evidence: 'organiser-authored event metadata',
     },
-    availability: availabilityFor(event),
+    availability: availabilityFor(event, reservedTickets),
   }
 }
 
 export function createPublicEventCatalogue(
   events: readonly DemoEvent[],
   organisations: readonly DemoOrganisation[],
+  options: { readonly getReservedTickets?: (eventId: string) => number | null } = {},
 ): PublicEventCatalogue {
   const organisationsById = new Map(organisations.map((organisation) => [organisation.id, organisation]))
   const eventsById = new Map(events.map((event) => [event.id, event]))
+  const reservedTicketsFor = (event: DemoEvent) => options.getReservedTickets?.(event.id) ?? event.reservedTickets
 
   return {
     search(input) {
@@ -229,7 +232,7 @@ export function createPublicEventCatalogue(
         .toSorted((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
         .flatMap((event) => {
           const organisation = organisationsById.get(event.organisationId)
-          return organisation ? [summaryFor(event, organisation)] : []
+          return organisation ? [summaryFor(event, organisation, reservedTicketsFor(event))] : []
         })
 
       return { ok: true, data: matches }
@@ -256,7 +259,7 @@ export function createPublicEventCatalogue(
       return {
         ok: true,
         data: {
-          ...summaryFor(event, organisation),
+          ...summaryFor(event, organisation, reservedTicketsFor(event)),
           summary: event.summary,
           description: event.description,
           publicationStatus: event.publicationStatus,

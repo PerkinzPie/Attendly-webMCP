@@ -2,6 +2,11 @@ import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, use
 import { flushSync } from 'react-dom'
 import './App.css'
 import { getDemoEventOperationsService } from './application/demoEventOperations'
+import {
+  createPublicBookingService,
+  type ConfirmedFreeBooking,
+  type FreeBookingDraft,
+} from './application/publicBookingService'
 import { createPublicEventCatalogue } from './application/publicEventCatalogue'
 import type {
   EventOperationsService,
@@ -40,6 +45,7 @@ import { createEventContextTools } from './webmcp/eventContextTools'
 import { createEventReadTools } from './webmcp/eventReadTools'
 import { createAttendeeCheckInTool } from './webmcp/attendeeCheckInTool'
 import { createAccountabilityTools } from './webmcp/accountabilityTools'
+import { createPublicBookingTools } from './webmcp/publicBookingTools'
 import { createPublicEventTools } from './webmcp/publicEventTools'
 
 type IconName = 'arrow' | 'calendar' | 'check' | 'chevron' | 'clock' | 'close' | 'location' | 'note' | 'refresh' | 'search' | 'ticket'
@@ -277,10 +283,10 @@ function webMcpResult<T>(message: string, structuredContent: T) {
   }
 }
 
-function webMcpError(code: string, message: string) {
+function webMcpError(code: string, message: string, details: Record<string, unknown> = {}) {
   return {
     content: [{ type: 'text', text: message }],
-    structuredContent: { ok: false, error: { code, message } },
+    structuredContent: { ok: false, error: { code, message, ...details } },
     isError: true,
   }
 }
@@ -1224,7 +1230,15 @@ function OperationsWorkspace({
 
 function App({ operationsService }: { operationsService?: EventOperationsService }) {
   const [service] = useState(() => operationsService ?? getDemoEventOperationsService())
-  const [publicEventCatalogue] = useState(() => createPublicEventCatalogue(demoEvents, demoOrganisations))
+  const [publicBookingService] = useState(() => createPublicBookingService({
+    events: demoEvents,
+    organisations: demoOrganisations,
+  }))
+  const [publicEventCatalogue] = useState(() => createPublicEventCatalogue(
+    demoEvents,
+    demoOrganisations,
+    { getReservedTickets: publicBookingService.getReservedTickets },
+  ))
   const [initialOperationsResult] = useState(() => service.getSnapshot())
   const [initialRoute] = useState(readAppRoute)
   const [webMcpSupported] = useState(hasWebMcpSupport)
@@ -1254,10 +1268,14 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const [ticketCount, setTicketCount] = useState(2)
   const [bookingName, setBookingName] = useState('')
   const [bookingEmail, setBookingEmail] = useState('')
+  const [activeBookingDraft, setActiveBookingDraft] = useState<FreeBookingDraft | null>(null)
+  const [confirmedBooking, setConfirmedBooking] = useState<ConfirmedFreeBooking | null>(null)
+  const [bookingError, setBookingError] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const operationsHeadingRef = useRef<HTMLHeadingElement>(null)
   const directoryHeadingRef = useRef<HTMLHeadingElement>(null)
   const activeEventDraftRef = useRef(activeEventDraft)
+  const activeBookingDraftRef = useRef(activeBookingDraft)
 
   const selectedOrganisation = demoOrganisations.find((item) => item.id === selectedOrganisationId) ?? null
   const createdEventContext = operationsSnapshot?.createdEvents
@@ -1444,6 +1462,11 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setTicketCount(2)
     setBookingName('')
     setBookingEmail('')
+    activeBookingDraftRef.current = null
+    setActiveBookingDraft(null)
+    setConfirmedBooking(null)
+    setBookingError(null)
+    publicBookingService.reset()
     activeEventDraftRef.current = null
     setActiveEventDraft(null)
     setIsCreatingEvent(false)
@@ -1459,31 +1482,130 @@ function App({ operationsService }: { operationsService?: EventOperationsService
       const scopedEvents = selectedOrganisationId
         ? getOrganisationEvents(selectedOrganisationId)
         : demoEvents
-      const tools = createPublicEventTools(scopedEvents.map((event) => event.id), {
-        searchPublicEvents: (input) => {
-          const result = publicEventCatalogue.search({
-            ...input,
-            ...(selectedOrganisationId ? { organisationId: selectedOrganisationId } : {}),
-          })
-          if (!result.ok) return webMcpError(result.error.code, result.error.message)
-          return webMcpResult(`Found ${result.data.length} published events.`, {
-            ok: true,
-            scope: selectedOrganisationId
-              ? { organisationId: selectedOrganisationId }
-              : { organisationId: null },
-            query: input,
-            events: result.data,
-          })
-        },
-        getPublicEventDetails: (eventId) => {
-          const result = publicEventCatalogue.getDetails(eventId, selectedOrganisationId ?? undefined)
-          if (!result.ok) return webMcpError(result.error.code, result.error.message)
-          return webMcpResult(`${result.data.name} details read.`, {
-            ok: true,
-            event: result.data,
-          })
-        },
-      })
+      const scopedEventIds = scopedEvents.map((event) => event.id)
+      const tools = [
+        ...createPublicEventTools(scopedEventIds, {
+          searchPublicEvents: (input) => {
+            const result = publicEventCatalogue.search({
+              ...input,
+              ...(selectedOrganisationId ? { organisationId: selectedOrganisationId } : {}),
+            })
+            if (!result.ok) return webMcpError(result.error.code, result.error.message)
+            return webMcpResult(`Found ${result.data.length} published events.`, {
+              ok: true,
+              scope: selectedOrganisationId
+                ? { organisationId: selectedOrganisationId }
+                : { organisationId: null },
+              query: input,
+              events: result.data,
+            })
+          },
+          getPublicEventDetails: (eventId) => {
+            const result = publicEventCatalogue.getDetails(eventId, selectedOrganisationId ?? undefined)
+            if (!result.ok) return webMcpError(result.error.code, result.error.message)
+            return webMcpResult(`${result.data.name} details read.`, {
+              ok: true,
+              event: result.data,
+            })
+          },
+        }),
+        ...createPublicBookingTools(scopedEventIds, {
+          createFreeBookingDraft: async (input) => {
+            const event = scopedEvents.find((item) => item.id === input.eventId)
+            if (!event) {
+              return webMcpError(
+                'event_not_found',
+                'Use a published event identifier from the current public events page.',
+              )
+            }
+            const result = publicBookingService.createDraft({
+              eventId: event.id,
+              quantities: {
+                adultTickets: input.adultTickets,
+                childTickets: input.childTickets,
+              },
+              guardian: {
+                name: input.guardianName,
+                email: input.guardianEmail,
+              },
+            })
+            if (!result.ok) {
+              return webMcpError(result.error.code, result.error.message, {
+                currentAvailability: result.error.currentAvailability,
+                requiresNewDraft: result.error.requiresNewDraft,
+              })
+            }
+
+            const organisation = organisationsById.get(event.organisationId)
+            activeBookingDraftRef.current = result.data
+            flushSync(() => {
+              setSelectedOrganisationId(organisation?.id ?? null)
+              setSelectedEvent(event)
+              setTicketCount(result.data.quantities.total)
+              setBookingName(result.data.guardian.name)
+              setBookingEmail(result.data.guardian.email)
+              setActiveBookingDraft(result.data)
+              setConfirmedBooking(null)
+              setBookingError(null)
+              setBookingStage('review')
+            })
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+            const bookingReview = document.getElementById('booking-review')
+            if (bookingReview && typeof bookingReview.scrollIntoView === 'function') {
+              bookingReview.scrollIntoView({ block: 'nearest' })
+            }
+            setOperationsAnnouncement(`${event.name} booking draft ready for review.`)
+            return webMcpResult(
+              `Draft ${result.data.draftId} is visible for review. Nothing has been booked.`,
+              { ok: true, draft: result.data },
+            )
+          },
+          confirmFreeBooking: (input) => {
+            const draft = activeBookingDraftRef.current
+            if (!draft || draft.draftId !== input.draftId) {
+              return webMcpError(
+                'draft_not_found',
+                'The matching booking draft is no longer active. Prepare a new draft for review.',
+                { requiresNewDraft: true },
+              )
+            }
+            if (!window.confirm(
+              `Confirm ${draft.quantities.total} free tickets for ${draft.event.name} (${draft.quantities.adultTickets} adult, ${draft.quantities.childTickets} child)?`,
+            )) {
+              return webMcpError('confirmation_declined', 'The free booking was not confirmed.')
+            }
+
+            const result = publicBookingService.confirmDraft(input)
+            if (!result.ok) {
+              setBookingError(result.error.message)
+              if (result.error.requiresNewDraft) {
+                activeBookingDraftRef.current = null
+                setActiveBookingDraft(null)
+                setBookingStage('details')
+              }
+              return webMcpError(result.error.code, result.error.message, {
+                currentAvailability: result.error.currentAvailability,
+                requiresNewDraft: result.error.requiresNewDraft,
+              })
+            }
+
+            flushSync(() => {
+              setConfirmedBooking(result.data.booking)
+              setBookingError(null)
+              setBookingStage('confirmed')
+            })
+            setOperationsAnnouncement(`${draft.event.name} booking confirmed.`)
+            return webMcpResult(
+              `Booking ${result.data.booking.bookingReference} confirmed and displayed.`,
+              {
+                ok: true,
+                idempotent: result.data.idempotent,
+                booking: result.data.booking,
+              },
+            )
+          },
+        }),
+      ]
       const registration = registerWebMcpTools(tools)
       void registration.ready.catch(() => undefined)
       return registration.unregister
@@ -1946,6 +2068,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     operationsEventId,
     operationsOrganisationId,
     publicEventCatalogue,
+    publicBookingService,
     selectedOrganisationId,
     service,
     snapshotEventId,
@@ -1959,6 +2082,10 @@ function App({ operationsService }: { operationsService?: EventOperationsService
     setTicketCount(2)
     setBookingName('')
     setBookingEmail('')
+    activeBookingDraftRef.current = null
+    setActiveBookingDraft(null)
+    setConfirmedBooking(null)
+    setBookingError(null)
   }
 
   const closeEvent = () => {
@@ -1972,7 +2099,50 @@ function App({ operationsService }: { operationsService?: EventOperationsService
 
   const submitDetails = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!selectedEvent) return
+    const result = publicBookingService.createDraft({
+      eventId: selectedEvent.id,
+      quantities: { adultTickets: ticketCount, childTickets: 0 },
+      guardian: { name: bookingName, email: bookingEmail },
+    })
+    if (!result.ok) {
+      setBookingError(result.error.message)
+      return
+    }
+    activeBookingDraftRef.current = result.data
+    setActiveBookingDraft(result.data)
+    setConfirmedBooking(null)
+    setBookingError(null)
     setBookingStage('review')
+  }
+
+  const confirmVisibleBooking = () => {
+    const draft = activeBookingDraftRef.current
+    if (!draft) {
+      setBookingError('This booking draft is no longer active. Prepare a new draft for review.')
+      setBookingStage('details')
+      return
+    }
+    if (!window.confirm(
+      `Confirm ${draft.quantities.total} free tickets for ${draft.event.name} (${draft.quantities.adultTickets} adult, ${draft.quantities.childTickets} child)?`,
+    )) return
+
+    const result = publicBookingService.confirmDraft({
+      draftId: draft.draftId,
+      idempotencyKey: `human-${draft.draftId}`,
+    })
+    if (!result.ok) {
+      setBookingError(result.error.message)
+      if (result.error.requiresNewDraft) {
+        activeBookingDraftRef.current = null
+        setActiveBookingDraft(null)
+        setBookingStage('details')
+      }
+      return
+    }
+    setConfirmedBooking(result.data.booking)
+    setBookingError(null)
+    setBookingStage('confirmed')
   }
 
   return (
@@ -2181,27 +2351,30 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               <form className="dialog-content booking-form" onSubmit={submitDetails}>
                 <button className="back-button" type="button" onClick={() => setBookingStage('event')}>← Event details</button>
                 <div><p className="step-label">Your booking</p><h2 id="dialog-title">Who’s coming?</h2><p className="dialog-intro">Book up to six free places for {selectedEvent.name}.</p></div>
+                {bookingError ? <p className="field-error" role="alert">{bookingError}</p> : null}
                 <label>Number of people<select value={ticketCount} onChange={(event) => setTicketCount(Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
                 <label>Your name<input required autoComplete="name" value={bookingName} onChange={(event) => setBookingName(event.target.value)} /></label>
                 <label>Email address<input required type="email" autoComplete="email" value={bookingEmail} onChange={(event) => setBookingEmail(event.target.value)} /><span>We’ll prepare the booking confirmation for this address.</span></label>
                 <button className="button button-primary button-wide" type="submit">Review booking <Icon name="arrow" /></button>
               </form>
             ) : null}
-            {bookingStage === 'review' ? (
-              <div className="dialog-content">
+            {bookingStage === 'review' && activeBookingDraft ? (
+              <div className="dialog-content" id="booking-review">
                 <button className="back-button" type="button" onClick={() => setBookingStage('details')}>← Change details</button>
                 <div><p className="step-label">Review</p><h2 id="dialog-title">Check your booking</h2><p className="dialog-intro">Nothing is booked until you confirm below.</p></div>
+                {bookingError ? <p className="field-error" role="alert">{bookingError}</p> : null}
                 <dl className="booking-review">
-                  <div><dt>Organisation</dt><dd>{selectedOrganisation ? formatOrganisationContext(selectedOrganisation) : ''}</dd></div><div><dt>Event</dt><dd>{selectedEvent.name}</dd></div><div><dt>Date</dt><dd>{selectedEvent.dateLabel}, {selectedEvent.timeLabel}</dd></div><div><dt>Places</dt><dd>{ticketCount}</dd></div><div><dt>Booked by</dt><dd>{bookingName}</dd></div><div><dt>Confirmation</dt><dd>{bookingEmail}</dd></div><div><dt>Total</dt><dd>£0.00</dd></div>
+                  <div><dt>Organisation</dt><dd>{selectedOrganisation ? formatOrganisationContext(selectedOrganisation) : ''}</dd></div><div><dt>Event</dt><dd>{selectedEvent.name}</dd></div><div><dt>Date</dt><dd>{selectedEvent.dateLabel}, {selectedEvent.timeLabel}</dd></div><div><dt>Places</dt><dd>{activeBookingDraft.quantities.total}</dd></div><div><dt>Adult tickets</dt><dd>{activeBookingDraft.quantities.adultTickets}</dd></div><div><dt>Child tickets</dt><dd>{activeBookingDraft.quantities.childTickets}</dd></div><div><dt>Booked by</dt><dd>{activeBookingDraft.guardian.name}</dd></div><div><dt>Confirmation</dt><dd>{activeBookingDraft.guardian.email}</dd></div><div><dt>Total</dt><dd>{activeBookingDraft.price.display}</dd></div>
                 </dl>
-                <button className="button button-primary button-wide" type="button" onClick={() => setBookingStage('confirmed')}>Confirm free booking</button>
+                <p className="dialog-intro">This draft expires at {new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(new Date(activeBookingDraft.expiresAt))}. Current availability: {activeBookingDraft.availability.remaining} places.</p>
+                <button className="button button-primary button-wide" type="button" onClick={confirmVisibleBooking}>Confirm free booking</button>
               </div>
             ) : null}
-            {bookingStage === 'confirmed' ? (
+            {bookingStage === 'confirmed' && confirmedBooking ? (
               <div className="dialog-content confirmation">
                 <div className="confirmation-icon"><Icon name="check" size={28} /></div>
-                <div><p className="step-label">Booking confirmed</p><h2 id="dialog-title">You’re on the list</h2><p className="dialog-intro">{ticketCount} {ticketCount === 1 ? 'place is' : 'places are'} reserved for {selectedEvent.name}. A confirmation has been prepared for {bookingEmail}.</p></div>
-                <div className="reference-box"><span>Booking reference</span><strong>ATT-{selectedEvent.id.slice(-4).toUpperCase()}-{ticketCount}</strong></div>
+                <div><p className="step-label">Booking confirmed</p><h2 id="dialog-title">You’re on the list</h2><p className="dialog-intro">{confirmedBooking.quantities.total} {confirmedBooking.quantities.total === 1 ? 'place is' : 'places are'} reserved for {selectedEvent.name}. A confirmation has been prepared for {confirmedBooking.guardian.email}.</p></div>
+                <div className="reference-box"><span>Booking reference</span><strong>{confirmedBooking.bookingReference}</strong></div>
                 <button className="button button-primary button-wide" type="button" onClick={closeEvent}>Done</button>
               </div>
             ) : null}

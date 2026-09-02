@@ -121,6 +121,8 @@ describe('Attendly organisation directory', () => {
     await waitFor(() => expect([...tools.keys()]).toEqual([
       'search_public_events',
       'get_public_event_details',
+      'create_free_booking_draft',
+      'confirm_free_booking',
     ]))
     expect(tools.get('search_public_events')?.annotations?.readOnlyHint).toBe(true)
     expect(tools.get('get_public_event_details')?.annotations?.readOnlyHint).toBe(true)
@@ -191,6 +193,98 @@ describe('Attendly organisation directory', () => {
     expect(scopedSearch.structuredContent.events.every((event) => (
       event.organisation.id === 'org_westbrook_school'
     ))).toBe(true)
+  })
+
+  it('renders, confirms and reconciles a free booking prepared through WebMCP', async () => {
+    const tools = installModelContext()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App operationsService={createTestOperationsService()} />)
+
+    await waitFor(() => expect(tools.has('create_free_booking_draft')).toBe(true))
+    let draftResult: {
+      structuredContent: {
+        draft: {
+          draftId: string
+          quantities: { adultTickets: number, childTickets: number, total: number }
+          price: { display: string }
+          availability: { remaining: number }
+          persisted: boolean
+          expiresAt: string
+        }
+      }
+    } | undefined
+    await act(async () => {
+      draftResult = await tools.get('create_free_booking_draft')?.execute({
+        eventId: 'evt_autumn_fair',
+        adultTickets: 1,
+        childTickets: 2,
+        guardianName: 'Alex Morgan',
+        guardianEmail: 'alex@example.test',
+      }) as typeof draftResult
+    })
+
+    expect(draftResult?.structuredContent.draft).toMatchObject({
+      draftId: expect.any(String),
+      quantities: { adultTickets: 1, childTickets: 2, total: 3 },
+      price: { display: '£0.00' },
+      availability: { remaining: 44 },
+      persisted: false,
+      expiresAt: expect.any(String),
+    })
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: 'Check your booking' })).toBeInTheDocument()
+    expect(within(dialog).getByText('Adult tickets').parentElement).toHaveTextContent('1')
+    expect(within(dialog).getByText('Child tickets').parentElement).toHaveTextContent('2')
+    expect(within(dialog).getByText('Booked by').parentElement).toHaveTextContent('Alex Morgan')
+    expect(within(dialog).getByText('Nothing is booked until you confirm below.')).toBeInTheDocument()
+
+    const draftId = draftResult?.structuredContent.draft.draftId ?? ''
+    const declined = await tools.get('confirm_free_booking')?.execute({
+      draftId,
+      idempotencyKey: 'booking-attempt-1',
+    }) as { structuredContent: { error: { code: string } } }
+    expect(confirm).toHaveBeenLastCalledWith(
+      'Confirm 3 free tickets for Willowbrook Autumn Fair (1 adult, 2 child)?',
+    )
+    expect(declined.structuredContent.error.code).toBe('confirmation_declined')
+    expect(within(dialog).queryByText('Booking reference')).not.toBeInTheDocument()
+
+    confirm.mockReturnValue(true)
+    let confirmed: {
+      structuredContent: {
+        idempotent: boolean
+        booking: { bookingReference: string, availability: { remaining: number } }
+      }
+    } | undefined
+    await act(async () => {
+      confirmed = await tools.get('confirm_free_booking')?.execute({
+        draftId,
+        idempotencyKey: 'booking-attempt-1',
+      }) as typeof confirmed
+    })
+    expect(confirmed?.structuredContent).toMatchObject({
+      idempotent: false,
+      booking: {
+        bookingReference: expect.stringMatching(/^ATT-/),
+        availability: { remaining: 41 },
+      },
+    })
+    const bookingReference = confirmed?.structuredContent.booking.bookingReference ?? ''
+    expect(within(dialog).getByText('Booking reference').parentElement).toHaveTextContent(bookingReference)
+
+    const details = await tools.get('get_public_event_details')?.execute({
+      eventId: 'evt_autumn_fair',
+    }) as { structuredContent: { event: { availability: { remaining: number } } } }
+    expect(details.structuredContent.event.availability.remaining).toBe(41)
+
+    const repeated = await tools.get('confirm_free_booking')?.execute({
+      draftId,
+      idempotencyKey: 'booking-attempt-1',
+    }) as typeof confirmed
+    expect(repeated?.structuredContent).toMatchObject({
+      idempotent: true,
+      booking: { bookingReference, availability: { remaining: 41 } },
+    })
   })
 
   it('lists events and opens a stable event management context', () => {
