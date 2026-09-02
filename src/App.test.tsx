@@ -928,7 +928,40 @@ describe('Attendly organisation directory', () => {
     expect(screen.getByText('Friends of Willowbrook Primary · Cheltenham, Gloucestershire')).toBeInTheDocument()
     expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Willowbrook Main Hall')
     expect(screen.queryByLabelText('Current event totals')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Attendees' })).not.toBeInTheDocument()
     expect(window.location.pathname).toBe('/organisations/org_westbrook_pta/events/evt_quiz_night')
+  })
+
+  it('shows searchable attendees for published Willowbrook school events before check-in opens', () => {
+    render(<App operationsService={createTestOperationsService()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+
+    const eventRow = screen.getByRole('heading', { level: 2, name: 'Willowbrook Autumn Fair' }).closest('article')
+    expect(eventRow).not.toBeNull()
+    expect(within(eventRow as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Published')
+    fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
+    expect(screen.getByText('Published')).toBeInTheDocument()
+    const attendees = screen.getByRole('region', { name: 'Attendees' })
+    expect(within(attendees).getByText('Registration is visible before check-in opens.')).toBeInTheDocument()
+    expect(within(attendees).getByText('136 attendees')).toBeInTheDocument()
+    expect(within(attendees).getAllByRole('heading', { level: 3 })).toHaveLength(24)
+
+    fireEvent.click(within(attendees).getByRole('button', { name: 'Show all 136 attendees' }))
+    expect(within(attendees).getAllByRole('heading', { level: 3 })).toHaveLength(136)
+
+    fireEvent.change(within(attendees).getByPlaceholderText('Search attendees'), {
+      target: { value: 'Amelia Adams' },
+    })
+    expect(within(attendees).getByText('1 match')).toBeInTheDocument()
+    expect(within(attendees).getByRole('heading', { level: 3, name: 'Amelia Adams' })).toBeInTheDocument()
+    expect(within(attendees).getByText(/Registration AUT-001/)).toBeInTheDocument()
+    expect(within(attendees).getByText('Registered')).toBeInTheDocument()
+
+    fireEvent.change(within(attendees).getByPlaceholderText('Search attendees'), {
+      target: { value: 'Nobody Here' },
+    })
+    expect(within(attendees).getByText('No attendees found.')).toBeInTheDocument()
   })
 
   it('finds attendees and expands their grouped registration', () => {

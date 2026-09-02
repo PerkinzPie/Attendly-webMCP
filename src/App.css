@@ -811,6 +811,7 @@
 }
 
 .attendee-result { border-bottom: 1px solid var(--border); }
+.published-attendee-result { content-visibility: auto; contain-intrinsic-size: 68px; }
 
 .attendee-result-summary {
   display: flex;
@@ -840,6 +841,10 @@
 }
 
 .attendee-registration-button { min-height: 34px; width: 34px; }
+.published-attendee-lookup { margin-top: 34px; }
+.published-attendee-lookup .attendee-lookup-heading > div { display: grid; gap: 5px; }
+.published-attendee-lookup .attendee-lookup-heading p { margin: 0; color: var(--text-subtle); font-size: 0.78rem; }
+.attendee-show-all { margin-top: 18px; }
 
 .check-in-state {
   color: var(--text-subtle);

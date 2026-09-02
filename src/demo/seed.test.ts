@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createDemoOperationsSeed, demoOrganisations } from './seed'
+import {
+  createDemoOperationsSeed,
+  demoEvents,
+  demoOrganisations,
+  demoPublishedEventAttendees,
+  getPublishedEventAttendees,
+} from './seed'
 
 describe('deterministic event-operations seed', () => {
   it('gives every organisation a specific English location', () => {
@@ -37,6 +43,22 @@ describe('deterministic event-operations seed', () => {
       status: 'unresolved',
       suggestedAttendeeId: sarah?.id,
     }))
+  })
+
+  it('provides deterministic synthetic attendee registers for Willowbrook school events', () => {
+    const willowbrookEvents = demoEvents.filter((event) => event.organisationId === 'org_westbrook_school')
+
+    expect(willowbrookEvents).toHaveLength(3)
+    for (const event of willowbrookEvents) {
+      const attendees = getPublishedEventAttendees(event.id)
+      expect(attendees).toHaveLength(event.reservedTickets)
+      expect(attendees.every((attendee) => attendee.eventId === event.id)).toBe(true)
+      expect(attendees.every((attendee) => attendee.status === 'registered')).toBe(true)
+      expect(attendees.every((attendee) => attendee.email.endsWith('@example.test'))).toBe(true)
+      expect(attendees.every((attendee) => attendee.isSynthetic)).toBe(true)
+    }
+    expect(demoPublishedEventAttendees).toHaveLength(174)
+    expect(getPublishedEventAttendees('evt_quiz_night')).toEqual([])
   })
 
   it('includes grouped registration, assistance, capacity, and duplicate-candidate examples', () => {

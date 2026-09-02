@@ -26,9 +26,11 @@ import {
   demoManagedEvents,
   demoOrganisations,
   getOrganisationEvents,
+  getPublishedEventAttendees,
   organisationTypes,
   type DemoEvent,
   type DemoOrganisation,
+  type DemoPublishedEventAttendee,
   type EventCategory,
   type OrganisationType,
 } from './demo/seed'
@@ -626,12 +628,14 @@ function EventOverviewWorkspace({
   event,
   organisation,
   status,
+  attendees = [],
   headingRef,
   onBack,
 }: {
-  event: Pick<CreatedEvent, 'name' | 'startsAt' | 'venue' | 'capacity'>
+  event: Pick<CreatedEvent, 'id' | 'name' | 'startsAt' | 'venue' | 'capacity'>
   organisation: DemoOrganisation
   status: 'Not started' | 'Published'
+  attendees?: readonly DemoPublishedEventAttendee[]
   headingRef: RefObject<HTMLHeadingElement | null>
   onBack: () => void
 }) {
@@ -651,7 +655,74 @@ function EventOverviewWorkspace({
           <div><dt>Venue</dt><dd>{event.venue}</dd></div>
           <div><dt>Capacity</dt><dd>{event.capacity}</dd></div>
         </dl>
+        {attendees.length > 0 ? <PublishedAttendeeList attendees={attendees} /> : null}
       </div>
+    </section>
+  )
+}
+
+function PublishedAttendeeList({ attendees }: { attendees: readonly DemoPublishedEventAttendee[] }) {
+  const [query, setQuery] = useState('')
+  const [showAll, setShowAll] = useState(false)
+  const normalisedQuery = query.trim().toLocaleLowerCase('en-GB')
+  const matches = useMemo(() => normalisedQuery
+    ? attendees.filter((attendee) => [
+        attendee.name,
+        attendee.email,
+        attendee.registrationReference,
+      ].some((value) => value.toLocaleLowerCase('en-GB').includes(normalisedQuery)))
+    : attendees, [attendees, normalisedQuery])
+  const visibleAttendees = showAll || normalisedQuery ? matches : matches.slice(0, 24)
+  const countLabel = normalisedQuery
+    ? `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`
+    : `${attendees.length} ${attendees.length === 1 ? 'attendee' : 'attendees'}`
+
+  return (
+    <section className="attendee-lookup published-attendee-lookup" aria-labelledby="published-attendee-title">
+      <div className="attendee-lookup-heading">
+        <div>
+          <h2 id="published-attendee-title">Attendees</h2>
+          <p>Registration is visible before check-in opens.</p>
+        </div>
+        <span aria-live="polite">{countLabel}</span>
+      </div>
+      <SearchField
+        label="Search Willowbrook attendees"
+        placeholder="Search attendees"
+        value={query}
+        onChange={(value) => {
+          setQuery(value)
+          setShowAll(false)
+        }}
+      />
+
+      {matches.length === 0 ? (
+        <p className="attendee-search-message">No attendees found.</p>
+      ) : (
+        <ul className="attendee-results">
+          {visibleAttendees.map((attendee) => (
+            <li key={attendee.id}>
+              <article className="attendee-result published-attendee-result">
+                <div className="attendee-result-summary">
+                  <div>
+                    <h3>{attendee.name}</h3>
+                    <p>Registration {attendee.registrationReference} · {attendee.email}</p>
+                  </div>
+                  <div className="attendee-result-actions">
+                    <span className="check-in-state registered">Registered</span>
+                  </div>
+                </div>
+              </article>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!normalisedQuery && !showAll && matches.length > visibleAttendees.length ? (
+        <button className="button button-secondary attendee-show-all" type="button" onClick={() => setShowAll(true)}>
+          Show all {matches.length} attendees
+        </button>
+      ) : null}
     </section>
   )
 }
@@ -2188,6 +2259,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             />
           ) : operationsOrganisation && createdEventContext ? (
             <EventOverviewWorkspace
+              key={createdEventContext.id}
               event={createdEventContext}
               organisation={operationsOrganisation}
               status="Not started"
@@ -2196,9 +2268,11 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             />
           ) : operationsOrganisation && publishedEventContext ? (
             <EventOverviewWorkspace
+              key={publishedEventContext.id}
               event={publishedEventContext}
               organisation={operationsOrganisation}
               status="Published"
+              attendees={getPublishedEventAttendees(publishedEventContext.id)}
               headingRef={operationsHeadingRef}
               onBack={showEvents}
             />

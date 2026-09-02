@@ -81,6 +81,16 @@ export type DemoAttendee = {
   isSynthetic: true
 }
 
+export type DemoPublishedEventAttendee = {
+  id: string
+  eventId: string
+  name: string
+  email: string
+  registrationReference: string
+  status: 'registered'
+  isSynthetic: true
+}
+
 export type DemoCheckIn = {
   id: string
   eventId: string
@@ -364,6 +374,75 @@ export const demoEvents: readonly DemoEvent[] = [
 
 export const getOrganisationEvents = (organisationId: string): readonly DemoEvent[] =>
   demoEvents.filter((item) => item.organisationId === organisationId)
+
+const willowbrookFirstNames = [
+  'Amelia',
+  'Oliver',
+  'Isla',
+  'George',
+  'Ava',
+  'Noah',
+  'Mia',
+  'Arthur',
+  'Sophia',
+  'Leo',
+  'Grace',
+  'Oscar',
+] as const
+
+const willowbrookSurnames = [
+  'Adams',
+  'Bennett',
+  'Clarke',
+  'Davies',
+  'Edwards',
+  'Foster',
+  'Green',
+  'Harris',
+  'Jones',
+  'Khan',
+  'Lewis',
+  'Morgan',
+] as const
+
+const willowbrookReferencePrefixes: Readonly<Record<string, string>> = {
+  evt_autumn_fair: 'AUT',
+  evt_online_safety: 'SAF',
+  evt_reception_welcome: 'REC',
+}
+
+function createPublishedAttendees(event: DemoEvent): readonly DemoPublishedEventAttendee[] {
+  const referencePrefix = willowbrookReferencePrefixes[event.id]
+  if (!referencePrefix) return []
+
+  return Array.from({ length: event.reservedTickets }, (_, index) => {
+    const firstName = willowbrookFirstNames[index % willowbrookFirstNames.length]
+    const surname = willowbrookSurnames[Math.floor(index / willowbrookFirstNames.length)]
+    const attendeeNumber = String(index + 1).padStart(3, '0')
+    return {
+      id: `att_${event.id.slice(4)}_${attendeeNumber}`,
+      eventId: event.id,
+      name: `${firstName} ${surname}`,
+      email: `willowbrook.${event.id.slice(4)}.${attendeeNumber}@example.test`,
+      registrationReference: `${referencePrefix}-${attendeeNumber}`,
+      status: 'registered',
+      isSynthetic: true,
+    }
+  })
+}
+
+export const demoPublishedEventAttendees: readonly DemoPublishedEventAttendee[] = demoEvents
+  .filter((event) => event.organisationId === 'org_westbrook_school')
+  .flatMap(createPublishedAttendees)
+
+const publishedAttendeesByEvent = new Map<string, readonly DemoPublishedEventAttendee[]>(
+  demoEvents
+    .filter((event) => event.organisationId === 'org_westbrook_school')
+    .map((event) => [event.id, demoPublishedEventAttendees.filter((attendee) => attendee.eventId === event.id)]),
+)
+
+export const getPublishedEventAttendees = (eventId: string): readonly DemoPublishedEventAttendee[] =>
+  publishedAttendeesByEvent.get(eventId) ?? []
 
 const operationsEvent: DemoEvent = event({
   id: 'evt_riverside_community_workshop',
