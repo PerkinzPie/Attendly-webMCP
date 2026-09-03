@@ -10,13 +10,17 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:pages": "pnpm build && wrangler pages dev dist",
     "build": "tsc -b && vite build",
     "lint": "oxlint .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "deploy": "pnpm check && pnpm dlx wrangler@4 pages deploy --branch main",
+    "cf-typegen": "wrangler types worker-configuration.d.ts --include-runtime false",
+    "db:migrate:local": "wrangler d1 migrations apply attendly-webmcp-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply attendly-webmcp-db --remote",
+    "deploy": "pnpm check && pnpm db:migrate:remote && wrangler pages deploy --branch main",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -24,6 +28,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260903.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.13.3",
@@ -34,6 +39,7 @@
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.128.0"
   }
 }

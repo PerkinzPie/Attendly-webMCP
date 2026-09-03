@@ -541,7 +541,7 @@ describe('event operations application service', () => {
       error: {
         code: 'persistence_failed',
         message: 'The event operation could not be saved.',
-        remediation: 'No changes were saved. Check browser storage and retry.',
+        remediation: 'No changes were saved. Check storage availability and retry.',
       },
     })
     expect(JSON.stringify(store.read())).toBe(before)

@@ -151,6 +151,10 @@ export type ResetDemoRequest = {
 export type ConfirmEventDraftRequest = {
   readonly draft: EventDraft
   readonly actor: OperationsActor
+  readonly persistedEvent?: {
+    readonly id: string
+    readonly createdAt: string
+  }
 }
 
 export type EventOperationsServiceOptions = {
@@ -248,7 +252,7 @@ const errors = {
   persistenceFailed: (): EventOperationsServiceError => ({
     code: 'persistence_failed',
     message: 'The event operation could not be saved.',
-    remediation: 'No changes were saved. Check browser storage and retry.',
+    remediation: 'No changes were saved. Check storage availability and retry.',
   }),
 }
 
@@ -455,8 +459,8 @@ export function createEventOperationsService(
       }
     },
     confirmEventDraft(request) {
-      const occurredAt = options.now()
-      const eventId = options.createId('event')
+      const occurredAt = request.persistedEvent?.createdAt ?? options.now()
+      const eventId = request.persistedEvent?.id ?? options.createId('event')
       const activityId = options.createId('activity')
       try {
         requireAuthorised(options, request.actor, 'create-event')
