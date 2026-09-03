@@ -1,6 +1,10 @@
-import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import './App.css'
+import {
+  createHttpCreatedEventRepository,
+  type CreatedEventRepository,
+} from './application/createdEventRepository'
 import { getDemoEventOperationsService } from './application/demoEventOperations'
 import {
   createPublicBookingService,
@@ -9,7 +13,10 @@ import {
 } from './application/publicBookingService'
 import { createPublicEventCatalogue } from './application/publicEventCatalogue'
 import type {
+  ConfirmEventDraftRequest,
+  CreateEventResult,
   EventOperationsService,
+  EventOperationsServiceResult,
   EventOperationsServiceSnapshot,
 } from './application/eventOperationsService'
 import type {
@@ -66,6 +73,7 @@ type AppRoute = {
 }
 
 const organisationsById = new Map(demoOrganisations.map((organisation) => [organisation.id, organisation]))
+const browserCreatedEventRepository = createHttpCreatedEventRepository()
 
 function formatOrganisationContext(organisation: DemoOrganisation) {
   return `${organisation.name} · ${organisation.location}`
@@ -252,7 +260,19 @@ function getActivityActionLabel(action: ActivityEntry['action']) {
   return labels[action]
 }
 
-function getManagedEvents(snapshot: EventOperationsServiceSnapshot | null): readonly ManagedEventToolRecord[] {
+function mergeCreatedEvents(...collections: readonly (readonly CreatedEvent[])[]) {
+  const eventsByDraftId = new Map<string, CreatedEvent>()
+  for (const events of collections) {
+    for (const event of events) eventsByDraftId.set(event.sourceDraftId, event)
+  }
+  return [...eventsByDraftId.values()]
+    .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
+}
+
+function getManagedEvents(
+  snapshot: EventOperationsServiceSnapshot | null,
+  createdEvents: readonly CreatedEvent[] = snapshot?.createdEvents ?? [],
+): readonly ManagedEventToolRecord[] {
   return [
     ...demoManagedEvents.map((event) => ({
       id: event.id,
@@ -267,7 +287,7 @@ function getManagedEvents(snapshot: EventOperationsServiceSnapshot | null): read
         ? snapshot.checkedInCount > 0 ? 'Check-in open' : 'Not started'
         : 'Published',
     })),
-    ...(snapshot?.createdEvents.map((event) => ({
+    ...createdEvents.map((event) => ({
       id: event.id,
       organisationId: event.organisationId,
       organisationName: organisationsById.get(event.organisationId)?.name ?? '',
@@ -277,9 +297,13 @@ function getManagedEvents(snapshot: EventOperationsServiceSnapshot | null): read
       venue: event.venue,
       capacity: event.capacity,
       state: 'Not started',
-    })) ?? []),
+    })),
   ].sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
 }
+
+type ConfirmEventDraftHandler = (
+  request: ConfirmEventDraftRequest,
+) => EventOperationsServiceResult<CreateEventResult> | Promise<EventOperationsServiceResult<CreateEventResult>>
 
 function webMcpResult<T>(message: string, structuredContent: T) {
   return {
@@ -342,7 +366,7 @@ function EventCreationWorkspace({
   organisations: readonly DemoOrganisation[]
   draft: EventDraft | null
   onPrepareDraft: EventOperationsService['prepareEventDraft']
-  onConfirmDraft: EventOperationsService['confirmEventDraft']
+  onConfirmDraft: ConfirmEventDraftHandler
   onDraftChange: (draft: EventDraft | null) => void
   onClose: () => void
 }) {
@@ -353,6 +377,7 @@ function EventCreationWorkspace({
   const [capacity, setCapacity] = useState('')
   const [createdEventId, setCreatedEventId] = useState<string | null>(null)
   const [serviceError, setServiceError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
   const updateField = (update: () => void) => {
     update()
@@ -392,20 +417,30 @@ function EventCreationWorkspace({
 
   const confirmDraft = () => {
     if (!draft || draft.errors.length > 0) return
-    const result = onConfirmDraft({ draft, actor: demoUiActor })
-    if (!result.ok) {
-      setServiceError(`${result.error.message} ${result.error.remediation}`)
-      return
+    const finish = (result: EventOperationsServiceResult<CreateEventResult>) => {
+      setIsSaving(false)
+      if (!result.ok) {
+        setServiceError(`${result.error.message} ${result.error.remediation}`)
+        return
+      }
+
+      setCreatedEventId(result.data.event.id)
+      onDraftChange(null)
+      setOrganisationId('')
+      setName('')
+      setStartsAt('')
+      setVenue('')
+      setCapacity('')
+      setServiceError(null)
     }
 
-    setCreatedEventId(result.data.event.id)
-    onDraftChange(null)
-    setOrganisationId('')
-    setName('')
-    setStartsAt('')
-    setVenue('')
-    setCapacity('')
-    setServiceError(null)
+    const result = onConfirmDraft({ draft, actor: demoUiActor })
+    if (result instanceof Promise) {
+      setIsSaving(true)
+      void result.then(finish)
+      return
+    }
+    finish(result)
   }
 
   const fieldError = (field: EventDraft['errors'][number]['field']) =>
@@ -433,7 +468,9 @@ function EventCreationWorkspace({
             <p className="event-draft-warning" key={`${warning.field}-${warning.message}`}>{warning.message}</p>
           ))}
           <div className="event-creation-buttons">
-            <button className="button button-primary" type="button" onClick={confirmDraft}>Confirm event</button>
+            <button className="button button-primary" type="button" disabled={isSaving} onClick={confirmDraft}>
+              {isSaving ? 'Saving event…' : 'Confirm event'}
+            </button>
             <button className="button button-secondary" type="button" onClick={cancelDraft}>Cancel draft</button>
           </div>
         </div>
@@ -527,6 +564,7 @@ function EventsWorkspace({
   onOpenEvent,
   onPrepareEventDraft,
   onConfirmEventDraft,
+  createdEvents,
 }: {
   snapshot: EventOperationsServiceSnapshot | null
   error: string | null
@@ -537,10 +575,11 @@ function EventsWorkspace({
   onDraftChange: (draft: EventDraft | null) => void
   onOpenEvent: (organisationId: string, eventId: string) => void
   onPrepareEventDraft: EventOperationsService['prepareEventDraft']
-  onConfirmEventDraft: EventOperationsService['confirmEventDraft']
+  onConfirmEventDraft: ConfirmEventDraftHandler
+  createdEvents: readonly CreatedEvent[]
 }) {
   const [organisationFilterId, setOrganisationFilterId] = useState('all')
-  const managedEvents = getManagedEvents(snapshot)
+  const managedEvents = getManagedEvents(snapshot, createdEvents)
   const visibleManagedEvents = organisationFilterId === 'all'
     ? managedEvents
     : managedEvents.filter((event) => event.organisationId === organisationFilterId)
@@ -1292,8 +1331,14 @@ function OperationsWorkspace({
   )
 }
 
-function App({ operationsService }: { operationsService?: EventOperationsService }) {
+function App({ operationsService, createdEventRepository }: {
+  operationsService?: EventOperationsService
+  createdEventRepository?: CreatedEventRepository
+}) {
   const [service] = useState(() => operationsService ?? getDemoEventOperationsService())
+  const [eventRepository] = useState(() => (
+    createdEventRepository ?? (operationsService ? null : browserCreatedEventRepository)
+  ))
   const [publicBookingService] = useState(() => createPublicBookingService({
     events: demoEvents,
     organisations: demoOrganisations,
@@ -1320,6 +1365,8 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const [operationsRefreshState, setOperationsRefreshState] = useState<SnapshotRefreshState>(
     initialOperationsResult.ok ? 'fresh' : 'stale',
   )
+  const [persistedCreatedEvents, setPersistedCreatedEvents] = useState<readonly CreatedEvent[]>([])
+  const [createdEventStorageError, setCreatedEventStorageError] = useState<string | null>(null)
   const [isCreatingEvent, setIsCreatingEvent] = useState(false)
   const [activeEventDraft, setActiveEventDraft] = useState<EventDraft | null>(null)
   const [activeCheckInReview, setActiveCheckInReview] = useState<AttendeeCheckInReview | null>(null)
@@ -1343,7 +1390,12 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   const activeBookingDraftRef = useRef(activeBookingDraft)
 
   const selectedOrganisation = demoOrganisations.find((item) => item.id === selectedOrganisationId) ?? null
-  const createdEventContext = operationsSnapshot?.createdEvents
+  const allCreatedEvents = useMemo(() => mergeCreatedEvents(
+    operationsSnapshot?.createdEvents ?? [],
+    persistedCreatedEvents,
+  ), [operationsSnapshot?.createdEvents, persistedCreatedEvents])
+  const allCreatedEventsRef = useRef(allCreatedEvents)
+  const createdEventContext = allCreatedEvents
     .find((event) => event.id === operationsEventId && event.organisationId === operationsOrganisationId) ?? null
   const publishedEventContext = demoManagedEvents
     .find((event) => event.id === operationsEventId && event.organisationId === operationsOrganisationId) ?? null
@@ -1398,6 +1450,55 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   }, [service])
 
   useEffect(() => {
+    allCreatedEventsRef.current = allCreatedEvents
+  }, [allCreatedEvents])
+
+  const refreshPersistedCreatedEvents = useCallback(async () => {
+    if (!eventRepository) return
+    try {
+      const events = await eventRepository.list()
+      setPersistedCreatedEvents(events)
+      setCreatedEventStorageError(null)
+    } catch {
+      setCreatedEventStorageError('Shared events could not be loaded. Check your connection and try again.')
+    }
+  }, [eventRepository])
+
+  useEffect(() => {
+    if (!eventRepository) return
+    const initialRefresh = requestAnimationFrame(() => void refreshPersistedCreatedEvents())
+    const refreshOnFocus = () => void refreshPersistedCreatedEvents()
+    window.addEventListener('focus', refreshOnFocus)
+    return () => {
+      cancelAnimationFrame(initialRefresh)
+      window.removeEventListener('focus', refreshOnFocus)
+    }
+  }, [eventRepository, refreshPersistedCreatedEvents])
+
+  const confirmEventDraft = useCallback<ConfirmEventDraftHandler>((request) => {
+    if (!eventRepository) return service.confirmEventDraft(request)
+
+    return eventRepository.create(request.draft, request.actor.channel).then((persisted) => {
+      setPersistedCreatedEvents((current) => mergeCreatedEvents(current, [persisted.event]))
+      setCreatedEventStorageError(null)
+      return service.confirmEventDraft({
+        ...request,
+        persistedEvent: {
+          id: persisted.event.id,
+          createdAt: persisted.event.createdAt,
+        },
+      })
+    }).catch((): EventOperationsServiceResult<CreateEventResult> => ({
+      ok: false,
+      error: {
+        code: 'persistence_failed',
+        message: 'The event could not be saved to shared storage.',
+        remediation: 'Check your connection and confirm the event again.',
+      },
+    }))
+  }, [eventRepository, service])
+
+  useEffect(() => {
     const applyRoute = () => {
       const route = readAppRoute()
       setSurface(route.surface)
@@ -1444,6 +1545,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
   }
 
   const showEvents = () => {
+    void refreshPersistedCreatedEvents()
     pushAppPath('/events')
     setSelectedEvent(null)
     setSurface('events')
@@ -1741,7 +1843,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           listEvents: () => {
             const snapshot = service.getSnapshot()
             if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
-            const events = getManagedEvents(snapshot.data)
+            const events = getManagedEvents(snapshot.data, allCreatedEventsRef.current)
             return webMcpResult(`Found ${events.length} events.`, { ok: true, events })
           },
           createEventDraft: (input) => {
@@ -1752,7 +1854,12 @@ function App({ operationsService }: { operationsService?: EventOperationsService
             setActiveEventDraft(result.data)
             setIsCreatingEvent(true)
             setOperationsAnnouncement(`${result.data.name || 'Event'} draft ready for review.`)
-            requestAnimationFrame(() => document.getElementById('event-creation')?.scrollIntoView({ block: 'start' }))
+            requestAnimationFrame(() => {
+              const workspace = document.getElementById('event-creation')
+              if (workspace && typeof workspace.scrollIntoView === 'function') {
+                workspace.scrollIntoView({ block: 'start' })
+              }
+            })
             return webMcpResult(
               `Draft ${result.data.id} is ready for review. No event has been created.`,
               {
@@ -1769,22 +1876,26 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               return webMcpError('stale_event_draft', 'The matching event draft is no longer active.')
             }
 
+            const finish = (result: EventOperationsServiceResult<CreateEventResult>) => {
+              if (!result.ok) return webMcpError(result.error.code, result.error.message)
 
-            const result = service.confirmEventDraft({ draft, actor: demoToolActor })
-            if (!result.ok) return webMcpError(result.error.code, result.error.message)
+              activeEventDraftRef.current = null
+              setActiveEventDraft(null)
+              setIsCreatingEvent(false)
+              setOperationsAnnouncement(`${result.data.event.name} created.`)
+              return webMcpResult(
+                `${result.data.event.name} was created and saved to the shared event list.`,
+                {
+                  ok: true,
+                  event: result.data.event,
+                  revision: result.data.snapshot.revision,
+                  persisted: true,
+                },
+              )
+            }
 
-            activeEventDraftRef.current = null
-            setActiveEventDraft(null)
-            setIsCreatingEvent(false)
-            setOperationsAnnouncement(`${result.data.event.name} created.`)
-            return webMcpResult(
-              `${result.data.event.name} was created.`,
-              {
-                ok: true,
-                event: result.data.event,
-                revision: result.data.snapshot.revision,
-              },
-            )
+            const result = confirmEventDraft({ draft, actor: demoToolActor })
+            return result instanceof Promise ? result.then(finish) : finish(result)
           },
         }, demoOrganisations.map((organisation) => organisation.id))
       : isEventControlRoom && operationsEventId
@@ -2102,7 +2213,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
         : createEventContextTools(() => {
           const snapshot = service.getSnapshot()
           if (!snapshot.ok) return webMcpError(snapshot.error.code, snapshot.error.message)
-          const event = getManagedEvents(snapshot.data).find((item) => (
+          const event = getManagedEvents(snapshot.data, allCreatedEventsRef.current).find((item) => (
             item.id === operationsEventId && item.organisationId === operationsOrganisationId
           ))
           if (!event) return webMcpError('stale_event_context', 'The active event is no longer available.')
@@ -2121,6 +2232,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
 
     return activateWebMcpTools(tools)
   }, [
+    confirmEventDraft,
     operationsEventId,
     operationsOrganisationId,
     publicEventCatalogue,
@@ -2224,9 +2336,10 @@ function App({ operationsService }: { operationsService?: EventOperationsService
           operationsEventId === null && operationsOrganisationId === null ? (
             <EventsWorkspace
               snapshot={operationsSnapshot}
-              error={operationsError}
+              error={operationsError ?? createdEventStorageError}
               isCreatingEvent={isCreatingEvent}
               draft={activeEventDraft}
+              createdEvents={allCreatedEvents}
               headingRef={operationsHeadingRef}
               onCreatingEventChange={setIsCreatingEvent}
               onDraftChange={(draft) => {
@@ -2235,7 +2348,7 @@ function App({ operationsService }: { operationsService?: EventOperationsService
               }}
               onOpenEvent={openOperationsEvent}
               onPrepareEventDraft={service.prepareEventDraft}
-              onConfirmEventDraft={service.confirmEventDraft}
+              onConfirmEventDraft={confirmEventDraft}
             />
           ) : operationsOrganisation
             && operationsSnapshot?.event.id === operationsEventId

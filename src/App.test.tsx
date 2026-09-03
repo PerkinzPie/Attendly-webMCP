@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import type { CreatedEventRepository } from './application/createdEventRepository'
 import { createEventOperationsService, type EventOperationsService } from './application/eventOperationsService'
 import { createPersistentEventOperationsStore } from './application/eventOperationsStore'
 import { createDemoEventOperationsState, demoOrganisations } from './demo/seed'
-import type { OperationsActor } from './domain/eventOperations'
+import type { CreatedEvent, OperationsActor } from './domain/eventOperations'
 import type { WebMcpTool } from './webmcp/browserAdapter'
 
 const activeEventToolNames = [
@@ -63,6 +64,47 @@ function createTestOperationsHarness() {
 
 function createTestOperationsService(): EventOperationsService {
   return createTestOperationsHarness().service
+}
+
+function createTestCreatedEventRepository(initialEvents: readonly CreatedEvent[] = []) {
+  const events = [...initialEvents]
+  const repository: CreatedEventRepository = {
+    list: vi.fn(async () => events.map((event) => ({
+      ...event,
+      createdBy: { ...event.createdBy },
+    }))),
+    create: vi.fn(async (draft, actorChannel) => {
+      const existing = events.find((event) => event.sourceDraftId === draft.id)
+      if (existing) return { event: existing, idempotent: true }
+      const event: CreatedEvent = {
+        id: `event_shared_${events.length + 1}`,
+        sourceDraftId: draft.id,
+        organisationId: draft.organisationId,
+        name: draft.name,
+        startsAt: draft.startsAt,
+        venue: draft.venue,
+        capacity: draft.capacity,
+        createdAt: '2026-09-05T18:31:00+01:00',
+        createdBy: actorChannel === 'webmcp'
+          ? {
+              id: 'actor_attendly_site_tool',
+              displayName: 'Attendly site tool',
+              channel: actorChannel,
+              isSynthetic: true,
+            }
+          : {
+              id: 'actor_demo_demonstrator',
+              displayName: 'Event manager',
+              channel: actorChannel,
+              isSynthetic: true,
+            },
+        isSynthetic: true,
+      }
+      events.push(event)
+      return { event, idempotent: false }
+    }),
+  }
+  return repository
 }
 
 function installModelContext() {
@@ -352,8 +394,9 @@ describe('Attendly organisation directory', () => {
 
   it('exposes reviewable event preparation tools on the events page', async () => {
     const service = createTestOperationsService()
+    const createdEventRepository = createTestCreatedEventRepository()
     const tools = installModelContext()
-    render(<App operationsService={service} />)
+    render(<App operationsService={service} createdEventRepository={createdEventRepository} />)
     fireEvent.click(screen.getByRole('button', { name: 'Events' }))
 
     await waitFor(() => expect([...tools.keys()]).toEqual([
@@ -419,6 +462,10 @@ describe('Attendly organisation directory', () => {
       await confirmTool?.execute({ draftId })
     })
 
+    expect(createdEventRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draftId, name: 'Family Games Night' }),
+      'webmcp',
+    )
     expect(screen.getByRole('heading', { level: 2, name: 'Family Games Night' })).toBeInTheDocument()
     expect(service.getSnapshot()).toMatchObject({
       ok: true,
@@ -436,6 +483,42 @@ describe('Attendly organisation directory', () => {
     }
     expect(repeatedResult.structuredContent.error.code).toBe('stale_event_draft')
     expect(service.getSnapshot()).toMatchObject({ ok: true, data: { createdEvents: [{ name: 'Family Games Night' }] } })
+  })
+
+  it('loads an event created in another session from the shared event store', async () => {
+    const sharedEvent: CreatedEvent = {
+      id: 'event_shared_browser_demo',
+      sourceDraftId: 'event-draft_chatgpt_demo',
+      organisationId: 'org_westbrook_school',
+      name: 'Willowbrook ChatGPT Demo',
+      startsAt: '2026-10-20T17:00:00.000Z',
+      venue: 'Willowbrook Hall',
+      capacity: 80,
+      createdAt: '2026-09-05T18:31:00+01:00',
+      createdBy: {
+        id: 'actor_attendly_site_tool',
+        displayName: 'Attendly site tool',
+        channel: 'webmcp',
+        isSynthetic: true,
+      },
+      isSynthetic: true,
+    }
+    const repository = createTestCreatedEventRepository([sharedEvent])
+    render(<App
+      operationsService={createTestOperationsService()}
+      createdEventRepository={repository}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }))
+    const eventHeading = await screen.findByRole('heading', { level: 2, name: sharedEvent.name })
+    const eventRow = eventHeading.closest('article')
+    expect(eventRow).not.toBeNull()
+    expect(within(eventRow as HTMLElement).getByText('Willowbrook Primary School · Cheltenham, Gloucestershire')).toBeInTheDocument()
+    fireEvent.click(within(eventRow as HTMLElement).getByRole('button', { name: 'Open' }))
+
+    expect(screen.getByRole('heading', { level: 1, name: sharedEvent.name })).toBeInTheDocument()
+    expect(screen.getByText('Venue').nextElementSibling).toHaveTextContent('Willowbrook Hall')
+    expect(window.location.pathname).toBe(`/organisations/org_westbrook_school/events/${sharedEvent.id}`)
   })
 
   it('replaces event-list tools with active event tools and rejects stale execution', async () => {

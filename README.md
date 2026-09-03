@@ -34,9 +34,12 @@ data remains deterministic and synthetic.
 The production build is published at
 **<https://attendly-webmcp.pages.dev/>**.
 
-State lives in the browser's local storage, so every visitor gets their own
-copy of the synthetic dataset. The **Reset demo** button restores the
-deterministic starting state at any time.
+Confirmed organiser-created events are stored in Cloudflare D1 and shared
+between ChatGPT and ordinary browser sessions. Operational rehearsal state,
+including check-ins and roll calls, remains in the browser's local storage so
+each visitor gets an isolated copy of that synthetic scenario. The **Reset
+demo** button resets that local rehearsal state; it does not delete confirmed
+events from the shared event list.
 
 ## WebMCP site tools
 
@@ -127,27 +130,39 @@ Or run an individual command:
 | `pnpm test` | Deterministic automated tests |
 | `pnpm build` | Production build |
 | `pnpm preview` | Preview the production output locally |
+| `pnpm dev:pages` | Build and run the site, Pages Function and local D1 together |
+| `pnpm db:migrate:local` | Apply pending migrations to local D1 storage |
+| `pnpm db:migrate:remote` | Apply pending migrations to production D1 storage |
 | `pnpm deploy` | Run all checks, then publish `dist/` to Cloudflare Pages |
 
 ## Deployment
 
-The site is a static single-page application deployed to Cloudflare Pages.
-No datastore, environment variables or secrets are required.
+The site is a React single-page application deployed to Cloudflare Pages. A
+same-origin Pages Function exposes `/api/events`, backed by the
+`attendly-webmcp-db` D1 database. Both the visible event workspace and the
+WebMCP creation tool use that endpoint, so a confirmed event is visible from a
+different browser session.
 
 ```sh
-wrangler login      # once, on your machine
-pnpm deploy         # blocked unless lint, types, tests and build all pass
+wrangler login             # once, on your machine
+pnpm db:migrate:local      # once, then whenever migrations change
+pnpm dev:pages             # local site and D1-backed API
+pnpm deploy                # checks, production migrations and Pages deploy
 ```
 
-`wrangler.jsonc` names the Pages project (`attendly-webmcp`) and the build
-output directory. The GitHub Actions **Deploy** workflow performs the same
-steps on every push to `main` when the `CLOUDFLARE_API_TOKEN` and
-`CLOUDFLARE_ACCOUNT_ID` repository secrets are configured; without them the
-workflow skips deployment and the last published release stays live.
+`wrangler.jsonc` names the Pages project (`attendly-webmcp`), the build output
+directory and the D1 binding. The GitHub Actions **Deploy** workflow applies
+pending D1 migrations before publishing on every push to `main` when the
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets are
+configured; without them the workflow skips deployment and the last published
+release stays live.
 
 ## Project structure
 
 ```text
+functions/
+└── api/events.ts Shared confirmed-event API backed by D1
+migrations/      Versioned D1 schema migrations
 src/
 ├── application/ Shared services used by the UI and the WebMCP tools
 ├── demo/        Synthetic seed data

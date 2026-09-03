@@ -2,6 +2,21 @@
   // Cloudflare Pages configuration for the static Attendly-webMCP build.
   // Deploy with `pnpm deploy` after `pnpm check` passes.
   "name": "attendly-webmcp",
-  "compatibility_date": "2026-08-01",
-  "pages_build_output_dir": "dist"
+  "compatibility_date": "2026-09-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "pages_build_output_dir": "dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "attendly-webmcp-db",
+      "database_id": "ce53e019-4bae-4b10-85ce-918ea78683eb",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "head_sampling_rate": 1
+    }
+  }
 }
