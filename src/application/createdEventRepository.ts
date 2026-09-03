@@ -112,7 +112,7 @@ export function createHttpCreatedEventRepository(
 
   async function request(init?: RequestInit) {
     try {
-      return await options.fetch(endpoint, {
+      return await options.fetch.call(globalThis, endpoint, {
         cache: 'no-store',
         ...init,
         headers: {

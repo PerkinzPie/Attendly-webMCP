@@ -36,6 +36,16 @@ const draft: EventDraft = {
 }
 
 describe('HTTP created event repository', () => {
+  it('invokes browser fetch with the global object as its receiver', async () => {
+    const fetcher = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation')
+      return Promise.resolve(Response.json({ ok: true, events: [] }))
+    })
+    const repository = createHttpCreatedEventRepository({ fetch: fetcher })
+
+    await expect(repository.list()).resolves.toEqual([])
+  })
+
   it('loads shared events and deduplicates simultaneous list requests', async () => {
     let resolveResponse: ((response: Response) => void) | undefined
     const fetcher = vi.fn(() => new Promise<Response>((resolve) => {
