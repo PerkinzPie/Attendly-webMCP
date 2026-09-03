@@ -34,12 +34,15 @@ data remains deterministic and synthetic.
 The production build is published at
 **<https://attendly-webmcp.pages.dev/>**.
 
-Confirmed organiser-created events are stored in Cloudflare D1 and shared
-between ChatGPT and ordinary browser sessions. Operational rehearsal state,
-including check-ins and roll calls, remains in the browser's local storage so
-each visitor gets an isolated copy of that synthetic scenario. The **Reset
-demo** button resets that local rehearsal state; it does not delete confirmed
-events from the shared event list.
+Confirmed organiser-created events and confirmed free bookings are stored in
+Cloudflare D1 and shared between ChatGPT and ordinary browser sessions. A
+booking made on one device appears as a registered attendee on the event's
+page in the Events workspace from any other device, and counts against the
+event's availability everywhere. Operational rehearsal state, including
+check-ins and roll calls, remains in the browser's local storage so each
+visitor gets an isolated copy of that synthetic scenario. The **Reset demo**
+button resets that local rehearsal state; it does not delete confirmed events
+or bookings from shared storage.
 
 ## WebMCP site tools
 
@@ -138,10 +141,12 @@ Or run an individual command:
 ## Deployment
 
 The site is a React single-page application deployed to Cloudflare Pages. A
-same-origin Pages Function exposes `/api/events`, backed by the
-`attendly-webmcp-db` D1 database. Both the visible event workspace and the
-WebMCP creation tool use that endpoint, so a confirmed event is visible from a
-different browser session.
+same-origin Pages Functions expose `/api/events` and `/api/bookings`, backed
+by the `attendly-webmcp-db` D1 database. The visible booking flow, the event
+workspace and the WebMCP tools all use those endpoints, so a confirmed event
+or booking is visible from a different browser session. The bookings endpoint
+applies the same free-booking rules as the page and enforces capacity inside
+the insert itself, so simultaneous confirmations cannot overbook an event.
 
 ```sh
 wrangler login             # once, on your machine
@@ -161,7 +166,8 @@ release stays live.
 
 ```text
 functions/
-└── api/events.ts Shared confirmed-event API backed by D1
+├── api/events.ts   Shared confirmed-event API backed by D1
+└── api/bookings.ts Shared confirmed-booking API backed by D1
 migrations/      Versioned D1 schema migrations
 src/
 ├── application/ Shared services used by the UI and the WebMCP tools

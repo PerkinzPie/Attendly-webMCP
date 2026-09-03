@@ -5,13 +5,18 @@ import {
   createHttpCreatedEventRepository,
   type CreatedEventRepository,
 } from './application/createdEventRepository'
+import {
+  createHttpConfirmedBookingRepository,
+  type ConfirmedBookingRepository,
+} from './application/confirmedBookingRepository'
 import { getDemoEventOperationsService } from './application/demoEventOperations'
 import {
   createPublicBookingService,
   type ConfirmedFreeBooking,
   type FreeBookingDraft,
 } from './application/publicBookingService'
-import { createPublicEventCatalogue } from './application/publicEventCatalogue'
+import { createPublicEventCatalogue, type PublicEventAvailability } from './application/publicEventCatalogue'
+import { listPublishedEventAttendees, type PublishedEventAttendee } from './application/publishedAttendees'
 import type {
   ConfirmEventDraftRequest,
   CreateEventResult,
@@ -33,11 +38,9 @@ import {
   demoManagedEvents,
   demoOrganisations,
   getOrganisationEvents,
-  getPublishedEventAttendees,
   organisationTypes,
   type DemoEvent,
   type DemoOrganisation,
-  type DemoPublishedEventAttendee,
   type EventCategory,
   type OrganisationType,
 } from './demo/seed'
@@ -74,6 +77,7 @@ type AppRoute = {
 
 const organisationsById = new Map(demoOrganisations.map((organisation) => [organisation.id, organisation]))
 const browserCreatedEventRepository = createHttpCreatedEventRepository()
+const browserConfirmedBookingRepository = createHttpConfirmedBookingRepository()
 
 function formatOrganisationContext(organisation: DemoOrganisation) {
   return `${organisation.name} · ${organisation.location}`
@@ -195,8 +199,19 @@ function EventDate({ event }: { event: DemoEvent }) {
   )
 }
 
-function EventRow({ event, onSelect }: { event: DemoEvent; onSelect: (event: DemoEvent) => void }) {
-  const nearlyFull = event.capacity - event.reservedTickets <= 10
+function formatAvailabilityLabel(availability: PublicEventAvailability | null, fallback: string) {
+  if (!availability) return fallback
+  if (availability.soldOut) return 'Sold out'
+  return `${availability.remaining} ${availability.remaining === 1 ? 'place' : 'places'} available`
+}
+
+function EventRow({ event, availability, onSelect }: {
+  event: DemoEvent
+  availability: PublicEventAvailability | null
+  onSelect: (event: DemoEvent) => void
+}) {
+  const remaining = availability?.remaining ?? event.capacity - event.reservedTickets
+  const nearlyFull = remaining <= 10
 
   return (
     <article className="event-row">
@@ -211,7 +226,7 @@ function EventRow({ event, onSelect }: { event: DemoEvent; onSelect: (event: Dem
         <div className="event-meta">
           <span><Icon name="clock" /> {event.timeLabel}</span>
           <span><Icon name="location" /> {event.venue}</span>
-          <span><Icon name="ticket" /> {event.availabilityLabel}</span>
+          <span><Icon name="ticket" /> {formatAvailabilityLabel(availability, event.availabilityLabel)}</span>
         </div>
       </div>
       <button className="text-action" type="button" onClick={() => onSelect(event)}>
@@ -668,13 +683,15 @@ function EventOverviewWorkspace({
   organisation,
   status,
   attendees = [],
+  availability = null,
   headingRef,
   onBack,
 }: {
   event: Pick<CreatedEvent, 'id' | 'name' | 'startsAt' | 'venue' | 'capacity'>
   organisation: DemoOrganisation
   status: 'Not started' | 'Published'
-  attendees?: readonly DemoPublishedEventAttendee[]
+  attendees?: readonly PublishedEventAttendee[]
+  availability?: PublicEventAvailability | null
   headingRef: RefObject<HTMLHeadingElement | null>
   onBack: () => void
 }) {
@@ -693,6 +710,9 @@ function EventOverviewWorkspace({
           <div><dt>Date and time</dt><dd>{formatEventDate(event.startsAt)}</dd></div>
           <div><dt>Venue</dt><dd>{event.venue}</dd></div>
           <div><dt>Capacity</dt><dd>{event.capacity}</dd></div>
+          {availability ? (
+            <div><dt>Places booked</dt><dd>{availability.reserved} of {availability.capacity}</dd></div>
+          ) : null}
         </dl>
         {attendees.length > 0 ? <PublishedAttendeeList attendees={attendees} /> : null}
       </div>
@@ -700,7 +720,7 @@ function EventOverviewWorkspace({
   )
 }
 
-function PublishedAttendeeList({ attendees }: { attendees: readonly DemoPublishedEventAttendee[] }) {
+function PublishedAttendeeList({ attendees }: { attendees: readonly PublishedEventAttendee[] }) {
   const [query, setQuery] = useState('')
   const [showAll, setShowAll] = useState(false)
   const normalisedQuery = query.trim().toLocaleLowerCase('en-GB')
@@ -726,7 +746,7 @@ function PublishedAttendeeList({ attendees }: { attendees: readonly DemoPublishe
         <span aria-live="polite">{countLabel}</span>
       </div>
       <SearchField
-        label="Search Willowbrook attendees"
+        label="Search attendees"
         placeholder="Search attendees"
         value={query}
         onChange={(value) => {
@@ -745,9 +765,17 @@ function PublishedAttendeeList({ attendees }: { attendees: readonly DemoPublishe
                 <div className="attendee-result-summary">
                   <div>
                     <h3>{attendee.name}</h3>
-                    <p>Registration {attendee.registrationReference} · {attendee.email}</p>
+                    <p>
+                      Registration {attendee.registrationReference} · {attendee.email}
+                      {attendee.places > 1 ? ` · ${attendee.places} places` : ''}
+                    </p>
                   </div>
                   <div className="attendee-result-actions">
+                    {attendee.source === 'booking' ? (
+                      <span className="attendee-source">
+                        {attendee.bookedVia === 'webmcp' ? 'Booked via site tool' : 'Booked online'}
+                      </span>
+                    ) : null}
                     <span className="check-in-state registered">Registered</span>
                   </div>
                 </div>
@@ -1331,18 +1359,29 @@ function OperationsWorkspace({
   )
 }
 
-function App({ operationsService, createdEventRepository }: {
+function App({ operationsService, createdEventRepository, confirmedBookingRepository }: {
   operationsService?: EventOperationsService
   createdEventRepository?: CreatedEventRepository
+  confirmedBookingRepository?: ConfirmedBookingRepository
 }) {
   const [service] = useState(() => operationsService ?? getDemoEventOperationsService())
   const [eventRepository] = useState(() => (
     createdEventRepository ?? (operationsService ? null : browserCreatedEventRepository)
   ))
+  const [bookingRepository] = useState(() => (
+    confirmedBookingRepository ?? (operationsService ? null : browserConfirmedBookingRepository)
+  ))
   const [publicBookingService] = useState(() => createPublicBookingService({
     events: demoEvents,
     organisations: demoOrganisations,
+    repository: bookingRepository ?? undefined,
+    // Draft ids feed the visible booking's idempotency key, so they must be
+    // unique across visitors and page loads rather than a per-session counter.
+    createId: (kind) => `${kind}_${globalThis.crypto.randomUUID()}`,
   }))
+  const [confirmedBookings, setConfirmedBookings] = useState(() => publicBookingService.getConfirmedBookings())
+  const [bookingStorageError, setBookingStorageError] = useState<string | null>(null)
+  const [isConfirmingBooking, setIsConfirmingBooking] = useState(false)
   const [publicEventCatalogue] = useState(() => createPublicEventCatalogue(
     demoEvents,
     demoOrganisations,
@@ -1384,6 +1423,7 @@ function App({ operationsService, createdEventRepository }: {
   const [confirmedBooking, setConfirmedBooking] = useState<ConfirmedFreeBooking | null>(null)
   const [bookingError, setBookingError] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const backdropPointerDownRef = useRef(false)
   const operationsHeadingRef = useRef<HTMLHeadingElement>(null)
   const directoryHeadingRef = useRef<HTMLHeadingElement>(null)
   const activeEventDraftRef = useRef(activeEventDraft)
@@ -1464,16 +1504,31 @@ function App({ operationsService, createdEventRepository }: {
     }
   }, [eventRepository])
 
+  const refreshPersistedBookings = useCallback(async () => {
+    if (!bookingRepository) return
+    try {
+      publicBookingService.syncBookings(await bookingRepository.list())
+      setBookingStorageError(null)
+    } catch {
+      setBookingStorageError('Shared bookings could not be loaded. Check your connection and try again.')
+    }
+  }, [bookingRepository, publicBookingService])
+
+  useEffect(() => publicBookingService.subscribe(setConfirmedBookings), [publicBookingService])
+
   useEffect(() => {
-    if (!eventRepository) return
-    const initialRefresh = requestAnimationFrame(() => void refreshPersistedCreatedEvents())
-    const refreshOnFocus = () => void refreshPersistedCreatedEvents()
-    window.addEventListener('focus', refreshOnFocus)
+    if (!eventRepository && !bookingRepository) return
+    const refresh = () => {
+      void refreshPersistedCreatedEvents()
+      void refreshPersistedBookings()
+    }
+    const initialRefresh = requestAnimationFrame(refresh)
+    window.addEventListener('focus', refresh)
     return () => {
       cancelAnimationFrame(initialRefresh)
-      window.removeEventListener('focus', refreshOnFocus)
+      window.removeEventListener('focus', refresh)
     }
-  }, [eventRepository, refreshPersistedCreatedEvents])
+  }, [bookingRepository, eventRepository, refreshPersistedBookings, refreshPersistedCreatedEvents])
 
   const confirmEventDraft = useCallback<ConfirmEventDraftHandler>((request) => {
     if (!eventRepository) return service.confirmEventDraft(request)
@@ -1546,6 +1601,7 @@ function App({ operationsService, createdEventRepository }: {
 
   const showEvents = () => {
     void refreshPersistedCreatedEvents()
+    void refreshPersistedBookings()
     pushAppPath('/events')
     setSelectedEvent(null)
     setSurface('events')
@@ -1632,6 +1688,7 @@ function App({ operationsService, createdEventRepository }: {
     setConfirmedBooking(null)
     setBookingError(null)
     publicBookingService.reset()
+    void refreshPersistedBookings()
     activeEventDraftRef.current = null
     setActiveEventDraft(null)
     setIsCreatingEvent(false)
@@ -1753,7 +1810,7 @@ function App({ operationsService, createdEventRepository }: {
               { ok: true, draft: result.data },
             )
           },
-          confirmFreeBooking: (input) => {
+          confirmFreeBooking: async (input) => {
             const draft = activeBookingDraftRef.current
             if (!draft || draft.draftId !== input.draftId) {
               return webMcpError(
@@ -1763,7 +1820,9 @@ function App({ operationsService, createdEventRepository }: {
               )
             }
 
-            const result = publicBookingService.confirmDraft(input)
+            setIsConfirmingBooking(true)
+            const result = await publicBookingService.confirmDraft({ ...input, actorChannel: 'webmcp' })
+            setIsConfirmingBooking(false)
             if (!result.ok) {
               setBookingError(result.error.message)
               if (result.error.requiresNewDraft) {
@@ -2285,7 +2344,7 @@ function App({ operationsService, createdEventRepository }: {
     setBookingStage('review')
   }
 
-  const confirmVisibleBooking = () => {
+  const confirmVisibleBooking = async () => {
     const draft = activeBookingDraftRef.current
     if (!draft) {
       setBookingError('This booking draft is no longer active. Prepare a new draft for review.')
@@ -2293,10 +2352,13 @@ function App({ operationsService, createdEventRepository }: {
       return
     }
 
-    const result = publicBookingService.confirmDraft({
+    setIsConfirmingBooking(true)
+    const result = await publicBookingService.confirmDraft({
       draftId: draft.draftId,
       idempotencyKey: `human-${draft.draftId}`,
+      actorChannel: 'human-ui',
     })
+    setIsConfirmingBooking(false)
     if (!result.ok) {
       setBookingError(result.error.message)
       if (result.error.requiresNewDraft) {
@@ -2336,7 +2398,7 @@ function App({ operationsService, createdEventRepository }: {
           operationsEventId === null && operationsOrganisationId === null ? (
             <EventsWorkspace
               snapshot={operationsSnapshot}
-              error={operationsError ?? createdEventStorageError}
+              error={operationsError ?? createdEventStorageError ?? bookingStorageError}
               isCreatingEvent={isCreatingEvent}
               draft={activeEventDraft}
               createdEvents={allCreatedEvents}
@@ -2385,7 +2447,8 @@ function App({ operationsService, createdEventRepository }: {
               event={publishedEventContext}
               organisation={operationsOrganisation}
               status="Published"
-              attendees={getPublishedEventAttendees(publishedEventContext.id)}
+              attendees={listPublishedEventAttendees(publishedEventContext.id, confirmedBookings)}
+              availability={publicBookingService.getAvailability(publishedEventContext.id)}
               headingRef={operationsHeadingRef}
               onBack={showEvents}
             />
@@ -2426,7 +2489,7 @@ function App({ operationsService, createdEventRepository }: {
                   </div>
                 </div>
                 <div className="event-list">
-                  {visibleEvents.length > 0 ? visibleEvents.map((item) => <EventRow event={item} key={item.id} onSelect={openEvent} />) : (
+                  {visibleEvents.length > 0 ? visibleEvents.map((item) => <EventRow event={item} availability={publicBookingService.getAvailability(item.id)} key={item.id} onSelect={openEvent} />) : (
                     <div className="empty-state">
                       <Icon name="calendar" size={24} />
                       <h3>No events match that search</h3>
@@ -2501,7 +2564,7 @@ function App({ operationsService, createdEventRepository }: {
       </footer>
 
       {selectedEvent ? (
-        <dialog className="event-dialog" ref={dialogRef} aria-labelledby="dialog-title" onClose={() => setSelectedEvent(null)} onClick={(event) => { if (event.target === event.currentTarget) closeEvent() }}>
+        <dialog className="event-dialog" ref={dialogRef} aria-labelledby="dialog-title" onClose={() => setSelectedEvent(null)} onPointerDown={(event) => { backdropPointerDownRef.current = event.target === event.currentTarget }} onClick={(event) => { if (event.target === event.currentTarget && backdropPointerDownRef.current) closeEvent() }}>
           <div className="dialog-panel">
             <div className="dialog-header"><button className="icon-button" type="button" onClick={closeEvent} aria-label="Close event details"><Icon name="close" size={20} /></button></div>
             {bookingStage === 'event' ? (
@@ -2513,7 +2576,7 @@ function App({ operationsService, createdEventRepository }: {
                   <div><dt><Icon name="calendar" /> Date</dt><dd>{selectedEvent.dateLabel}</dd></div>
                   <div><dt><Icon name="clock" /> Time</dt><dd>{selectedEvent.timeLabel}</dd></div>
                   <div><dt><Icon name="location" /> Venue</dt><dd>{selectedEvent.venue}</dd></div>
-                  <div><dt><Icon name="ticket" /> Tickets</dt><dd>{selectedEvent.availabilityLabel}</dd></div>
+                  <div><dt><Icon name="ticket" /> Tickets</dt><dd>{formatAvailabilityLabel(publicBookingService.getAvailability(selectedEvent.id), selectedEvent.availabilityLabel)}</dd></div>
                 </dl>
                 <div className="booking-callout"><div><strong>Free entry</strong><span>{selectedEvent.bookingClosesLabel}</span></div><button className="button button-primary" type="button" onClick={() => setBookingStage('details')}>Book free tickets</button></div>
               </div>
@@ -2538,7 +2601,9 @@ function App({ operationsService, createdEventRepository }: {
                   <div><dt>Organisation</dt><dd>{selectedOrganisation ? formatOrganisationContext(selectedOrganisation) : ''}</dd></div><div><dt>Event</dt><dd>{selectedEvent.name}</dd></div><div><dt>Date</dt><dd>{selectedEvent.dateLabel}, {selectedEvent.timeLabel}</dd></div><div><dt>Places</dt><dd>{activeBookingDraft.quantities.total}</dd></div><div><dt>Adult tickets</dt><dd>{activeBookingDraft.quantities.adultTickets}</dd></div><div><dt>Child tickets</dt><dd>{activeBookingDraft.quantities.childTickets}</dd></div><div><dt>Booked by</dt><dd>{activeBookingDraft.guardian.name}</dd></div><div><dt>Confirmation</dt><dd>{activeBookingDraft.guardian.email}</dd></div><div><dt>Total</dt><dd>{activeBookingDraft.price.display}</dd></div>
                 </dl>
                 <p className="dialog-intro">This draft expires at {formatUpdatedTime(activeBookingDraft.expiresAt)}. Current availability: {activeBookingDraft.availability.remaining} places.</p>
-                <button className="button button-primary button-wide" type="button" onClick={confirmVisibleBooking}>Confirm free booking</button>
+                <button className="button button-primary button-wide" type="button" disabled={isConfirmingBooking} onClick={() => void confirmVisibleBooking()}>
+                  {isConfirmingBooking ? 'Confirming booking…' : 'Confirm free booking'}
+                </button>
               </div>
             ) : null}
             {bookingStage === 'confirmed' && confirmedBooking ? (

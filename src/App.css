@@ -853,6 +853,13 @@
   white-space: nowrap;
 }
 
+.attendee-source {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
 .check-in-state.checked-in { color: var(--success-strong); }
 .check-in-state.not-arrived { color: var(--warning-strong); }
 .check-in-success { color: var(--success-strong); font-weight: 650; }

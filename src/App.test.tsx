@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import type { ConfirmedBookingRepository, PersistedFreeBooking } from './application/confirmedBookingRepository'
 import type { CreatedEventRepository } from './application/createdEventRepository'
 import { createEventOperationsService, type EventOperationsService } from './application/eventOperationsService'
 import { createPersistentEventOperationsStore } from './application/eventOperationsStore'
-import { createDemoEventOperationsState, demoOrganisations } from './demo/seed'
+import { createDemoEventOperationsState, demoEvents, demoOrganisations } from './demo/seed'
 import type { CreatedEvent, OperationsActor } from './domain/eventOperations'
 import type { WebMcpTool } from './webmcp/browserAdapter'
 
@@ -102,6 +103,45 @@ function createTestCreatedEventRepository(initialEvents: readonly CreatedEvent[]
       }
       events.push(event)
       return { event, idempotent: false }
+    }),
+  }
+  return repository
+}
+
+function createTestConfirmedBookingRepository(initialBookings: readonly PersistedFreeBooking[] = []) {
+  const bookings = [...initialBookings]
+  const availabilityFor = (eventId: string) => {
+    const event = demoEvents.find((item) => item.id === eventId)
+    const capacity = event?.capacity ?? 0
+    const reserved = (event?.reservedTickets ?? 0) + bookings
+      .filter((booking) => booking.eventId === eventId)
+      .reduce((total, booking) => total + booking.quantities.total, 0)
+    return { capacity, reserved, remaining: capacity - reserved, soldOut: capacity - reserved <= 0 }
+  }
+  const repository: ConfirmedBookingRepository = {
+    list: vi.fn(async () => [...bookings]),
+    create: vi.fn(async (input) => {
+      const existing = bookings.find((booking) => booking.idempotencyKey === input.idempotencyKey)
+      if (existing) return { booking: existing, idempotent: true, availability: availabilityFor(existing.eventId) }
+      const event = demoEvents.find((item) => item.id === input.eventId)
+      if (!event) throw new Error('Unknown event')
+      const booking: PersistedFreeBooking = {
+        id: `booking_shared_${bookings.length + 1}`,
+        bookingReference: `ATT-SHARED${bookings.length + 1}`,
+        idempotencyKey: input.idempotencyKey,
+        eventId: event.id,
+        organisationId: event.organisationId,
+        guardian: input.guardian,
+        quantities: {
+          ...input.quantities,
+          total: input.quantities.adultTickets + input.quantities.childTickets,
+        },
+        confirmedAt: '2026-09-05T18:32:00+01:00',
+        confirmedVia: input.actorChannel,
+        isSynthetic: true,
+      }
+      bookings.push(booking)
+      return { booking, idempotent: false, availability: availabilityFor(event.id) }
     }),
   }
   return repository
@@ -317,6 +357,75 @@ describe('Attendly organisation directory', () => {
       idempotent: true,
       booking: { bookingReference, availability: { remaining: 41 } },
     })
+  })
+
+  it('stores confirmed bookings in the shared store and shows them as event attendees', async () => {
+    const sharedBooking: PersistedFreeBooking = {
+      id: 'booking_shared_1',
+      bookingReference: 'ATT-SHARED1',
+      idempotencyKey: 'chatgpt-booking-1',
+      eventId: 'evt_autumn_fair',
+      organisationId: 'org_westbrook_school',
+      guardian: { name: 'Priya Shah', email: 'priya@example.test' },
+      quantities: { adultTickets: 2, childTickets: 0, total: 2 },
+      confirmedAt: '2026-09-05T18:00:00+01:00',
+      confirmedVia: 'webmcp',
+      isSynthetic: true,
+    }
+    const repository = createTestConfirmedBookingRepository([sharedBooking])
+    const tools = installModelContext()
+    render(<App operationsService={createTestOperationsService()} confirmedBookingRepository={repository} />)
+
+    await waitFor(() => expect(repository.list).toHaveBeenCalled())
+    await waitFor(() => expect(tools.has('create_free_booking_draft')).toBe(true))
+    let draftResult: { structuredContent: { draft: { draftId: string, availability: { remaining: number } } } } | undefined
+    await act(async () => {
+      draftResult = await tools.get('create_free_booking_draft')?.execute({
+        eventId: 'evt_autumn_fair',
+        adultTickets: 1,
+        childTickets: 2,
+        guardianName: 'Alex Morgan',
+        guardianEmail: 'alex@example.test',
+      }) as typeof draftResult
+    })
+    expect(draftResult?.structuredContent.draft.availability.remaining).toBe(42)
+
+    let confirmed: { structuredContent: { booking: { bookingReference: string, availability: { remaining: number } } } } | undefined
+    await act(async () => {
+      confirmed = await tools.get('confirm_free_booking')?.execute({
+        draftId: draftResult?.structuredContent.draft.draftId ?? '',
+        idempotencyKey: 'booking-attempt-1',
+      }) as typeof confirmed
+    })
+    expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({
+      eventId: 'evt_autumn_fair',
+      guardian: { name: 'Alex Morgan', email: 'alex@example.test' },
+      idempotencyKey: 'booking-attempt-1',
+      actorChannel: 'webmcp',
+    }))
+    expect(confirmed?.structuredContent.booking).toMatchObject({
+      bookingReference: 'ATT-SHARED2',
+      availability: { remaining: 39 },
+    })
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Booking reference').parentElement).toHaveTextContent('ATT-SHARED2')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(screen.getByText('39 places available')).toBeInTheDocument()
+
+    openManagedEvent('Willowbrook Autumn Fair')
+    expect(screen.getByText('Places booked').nextElementSibling).toHaveTextContent('141 of 180')
+    const attendees = screen.getByRole('region', { name: 'Attendees' })
+    expect(within(attendees).getByText('138 attendees')).toBeInTheDocument()
+    const headings = within(attendees).getAllByRole('heading', { level: 3 })
+    expect(headings[0]).toHaveTextContent('Alex Morgan')
+    expect(headings[1]).toHaveTextContent('Priya Shah')
+
+    fireEvent.change(within(attendees).getByPlaceholderText('Search attendees'), {
+      target: { value: 'alex@example.test' },
+    })
+    expect(within(attendees).getByText('1 match')).toBeInTheDocument()
+    expect(within(attendees).getByText(/Registration ATT-SHARED2/)).toHaveTextContent('3 places')
+    expect(within(attendees).getByText('Booked via site tool')).toBeInTheDocument()
   })
 
   it('lists events and opens a stable event management context', () => {

@@ -6,6 +6,13 @@ import {
   type OperationsActor,
 } from '../../src/domain/eventOperations'
 import { demoOrganisations } from '../../src/demo/seed'
+import {
+  ApiRequestError,
+  errorResponse as error,
+  isRecord,
+  jsonResponse as json,
+  readBoundedJson,
+} from '../../src/application/apiRequest'
 
 type CreatedEventRow = {
   id: string
@@ -30,7 +37,6 @@ type CreateEventRequest = {
 }
 
 const authorisedOrganisationIds = demoOrganisations.map((organisation) => organisation.id)
-const maximumRequestBytes = 16_384
 const selectColumns = `
   id,
   source_draft_id,
@@ -45,21 +51,6 @@ const selectColumns = `
   created_by_channel,
   is_synthetic
 `
-
-function json(payload: unknown, status = 200) {
-  return Response.json(payload, {
-    status,
-    headers: { 'Cache-Control': 'no-store' },
-  })
-}
-
-function error(code: string, message: string, status: number) {
-  return json({ ok: false, error: { code, message } }, status)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 function actorFor(channel: OperationsActor['channel']): OperationsActor {
   return channel === 'webmcp'
@@ -106,34 +97,6 @@ function parseCreateRequest(value: unknown): CreateEventRequest | null {
       capacity: Number(draft.capacity),
     },
     actor: actorFor(value.actorChannel),
-  }
-}
-
-async function readBoundedJson(request: Request): Promise<unknown> {
-  const contentLength = Number(request.headers.get('Content-Length') ?? 0)
-  if (contentLength > maximumRequestBytes) throw new Error('request_too_large')
-  if (!request.body) throw new Error('invalid_json')
-
-  const reader = request.body.getReader()
-  const decoder = new TextDecoder()
-  let byteCount = 0
-  let body = ''
-  while (true) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    byteCount += chunk.value.byteLength
-    if (byteCount > maximumRequestBytes) {
-      await reader.cancel()
-      throw new Error('request_too_large')
-    }
-    body += decoder.decode(chunk.value, { stream: true })
-  }
-  body += decoder.decode()
-
-  try {
-    return JSON.parse(body)
-  } catch {
-    throw new Error('invalid_json')
   }
 }
 
@@ -271,10 +234,10 @@ export async function createCreatedEvent(request: Request, db: D1Database) {
 
     return json({ ok: true, event: stored, idempotent: stored.id !== event.id })
   } catch (caught) {
-    if (caught instanceof Error && caught.message === 'request_too_large') {
+    if (caught instanceof ApiRequestError && caught.code === 'request_too_large') {
       return error('request_too_large', 'The event request is too large.', 413)
     }
-    if (caught instanceof Error && caught.message === 'invalid_json') {
+    if (caught instanceof ApiRequestError && caught.code === 'invalid_json') {
       return error('invalid_json', 'The request body must be valid JSON.', 400)
     }
     console.error(JSON.stringify({
